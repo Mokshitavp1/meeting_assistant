@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Task Assigned</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: #f3f4f6;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #1f2937;
+    }
+
+    .wrapper {
+      max-width: 600px;
+      margin: 32px auto;
+      background: #ffffff;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, .12);
+    }
+
+    .header {
+      background: #4f46e5;
+      padding: 28px 32px;
+    }
+
+    .header h1 {
+      margin: 0;
+      color: #ffffff;
+      font-size: 22px;
+      font-weight: 700;
+    }
+
+    .header p {
+      margin: 4px 0 0;
+      color: #c7d2fe;
+      font-size: 13px;
+    }
+
+    .body {
+      padding: 32px;
+    }
+
+    .body p {
+      margin: 0 0 16px;
+      line-height: 1.6;
+      font-size: 15px;
+    }
+
+    .task-card {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      padding: 20px;
+      margin: 20px 0;
+    }
+
+    .task-card h2 {
+      margin: 0 0 12px;
+      font-size: 17px;
+      color: #111827;
+    }
+
+    .meta-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 13px;
+      color: #6b7280;
+    }
+
+    .meta-row strong {
+      color: #374151;
+      min-width: 80px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .4px;
+    }
+
+    .badge-high {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+
+    .badge-medium {
+      background: #fef3c7;
+      color: #b45309;
+    }
+
+    .badge-low {
+      background: #d1fae5;
+      color: #065f46;
+    }
+
+    .cta {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 10px 24px;
+      background: #4f46e5;
+      color: #ffffff !important;
+      text-decoration: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .footer {
+      padding: 20px 32px;
+      border-top: 1px solid #e5e7eb;
+      font-size: 12px;
+      color: #9ca3af;
+      text-align: center;
+    }
+
+    .ical-note {
+      margin-top: 12px;
+      font-size: 13px;
+      color: #6b7280;
+      font-style: italic;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrapper">
+    <div class="header">
+      <h1>New Task Assigned</h1>
+      <p>AI Meeting Assistant &mdash; Task Management</p>
+    </div>
+    <div class="body">
+      <p>Hi <strong>{{assigneeName}}</strong>,</p>
+      <p>A new task has been assigned to you{{#meetingTitle}} from the meeting
+        <em>"{{meetingTitle}}"</em>{{/meetingTitle}}.</p>
+
+      <div class="task-card">
+        <h2>{{taskTitle}}</h2>
+        {{#taskDescription}}<p style="margin:0 0 12px;font-size:14px;color:#4b5563;">{{taskDescription}}</p>
+        {{/taskDescription}}
+        <div class="meta-row"><strong>Priority:</strong> <span class="badge badge-{{priority}}">{{priority}}</span>
+        </div>
+        <div class="meta-row"><strong>Due Date:</strong> {{dueDateFormatted}}</div>
+        {{#meetingTitle}}<div class="meta-row"><strong>Meeting:</strong> {{meetingTitle}}</div>{{/meetingTitle}}
+        {{#assignedBy}}<div class="meta-row"><strong>Assigned by:</strong> {{assignedBy}}</div>{{/assignedBy}}
+      </div>
+
+      {{#taskUrl}}<a class="cta" href="{{taskUrl}}">View Task</a>{{/taskUrl}}
+      {{#dueDate}}<p class="ical-note">A calendar event (.ics) is attached to this email. Import it to add a reminder to
+        your calendar.</p>{{/dueDate}}
+    </div>
+    <div class="footer">
+      &copy; {{year}} AI Meeting Assistant. You received this email because a task was assigned to your account.
+    </div>
+  </div>
+</body>
+
+</html>

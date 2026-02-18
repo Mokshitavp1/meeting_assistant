@@ -41,6 +41,7 @@ model User {
   createdMeetings      Meeting[]
   meetingParticipants  MeetingParticipant[]
   assignedTasks        Task[]
+  taskComments         TaskComment[]
   workspaceMembers     WorkspaceMember[]
 
   @@index([email])
@@ -205,12 +206,40 @@ model Task {
   priority    String   @default("medium") // low, medium, high
   dueDate     DateTime?
 
+  // AI extraction tracking
+  isAiGenerated Boolean   @default(false)
+  confirmedAt   DateTime? // set when a human explicitly confirms an AI-extracted task
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   completedAt DateTime?
+
+  comments TaskComment[]
 
   @@index([meetingId])
   @@index([assignedToId])
   @@index([status])
   @@map("tasks")
+}
+
+// ============================================
+// TASK COMMENT MODEL
+// ============================================
+
+model TaskComment {
+  id      String @id @default(cuid())
+  content String @db.Text
+
+  taskId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([taskId])
+  @@index([userId])
+  @@map("task_comments")
 }

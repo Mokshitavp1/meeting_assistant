@@ -9,6 +9,9 @@ import {
     BadRequestError,
 } from '../middleware/error.middleware';
 import * as workspaceService from './workspace.service';
+import * as transcriptionService from './transcription.service';
+import * as aiExtractionService from './ai-extraction.service';
+import * as momService from './mom-generation.service';
 
 /**
  * Meeting Service
@@ -587,7 +590,7 @@ export async function triggerAIProcessing(meetingId: string, userId: string): Pr
 
 /**
  * Process meeting with AI (called by background job)
- * This is a placeholder - actual implementation would use OpenAI Whisper, GPT, etc.
+ * Runs transcription then generates summary and minutes via GPT.
  */
 export async function processMeetingWithAI(jobData: AIProcessingJob): Promise<void> {
     const { meetingId, recordingPath, recordingUrl } = jobData;
@@ -595,43 +598,52 @@ export async function processMeetingWithAI(jobData: AIProcessingJob): Promise<vo
     try {
         console.log(`[AI Processing] Starting processing for meeting ${meetingId}`);
 
-        // TODO: Step 1 - Transcribe audio using OpenAI Whisper or similar
-        // const transcription = await transcribeAudio(recordingUrl);
+        // ── Step 1: Transcribe ─────────────────────────────────────────────
+        // Use AssemblyAI if a cloud URL is available (enables diarization),
+        // otherwise fall back to Whisper with the local recording path.
+        const transcriptInput = recordingUrl || recordingPath;
+        const isUrl = /^https?:\/\//i.test(transcriptInput);
 
-        // TODO: Step 2 - Extract action items/tasks using GPT
-        // const tasks = await extractTasks(transcription);
-
-        // TODO: Step 3 - Generate meeting summary and minutes
-        // const summary = await generateSummary(transcription);
-        // const minutes = await generateMinutes(transcription);
-
-        // Placeholder data
-        const transcription = 'Transcription will be generated here...';
-        const summary = 'AI-generated summary will appear here...';
-        const minutes = 'AI-generated minutes of meeting will appear here...';
-
-        // Update meeting with AI-generated content
-        await prisma.meeting.update({
-            where: { id: meetingId },
-            data: {
-                transcriptUrl: 'transcript-url-placeholder',
-                summary,
-                minutesOfMeeting: minutes,
-            },
+        const transcript = await transcriptionService.transcribeAudio(transcriptInput, {
+            meetingId,
+            enableDiarization: isUrl,  // diarization requires a reachable URL
+            provider: isUrl ? 'assemblyai' : 'whisper',
         });
 
-        // TODO: Create tasks from extracted action items
-        // for (const task of tasks) {
-        //     await prisma.task.create({
-        //         data: {
-        //             title: task.title,
-        //             description: task.description,
-        //             meetingId,
-        //             priority: task.priority,
-        //             dueDate: task.dueDate,
-        //         },
-        //     });
-        // }
+        console.log(
+            `[AI Processing] Transcription complete — ${transcript.segments.length} segments, ` +
+            `${transcript.speakers.length} speaker(s), duration ${transcript.duration}s`
+        );
+
+        // ── Step 2: Extract tasks with GPT ────────────────────────────────
+        const extraction = await aiExtractionService.extractAndSaveTasks(transcript, {
+            meetingId,
+            saveToDB: true,
+        });
+
+        console.log(
+            `[AI Processing] Extraction complete — ${extraction.tasks.length} task(s) saved, ` +
+            `${extraction.skippedLowConfidence} skipped (low confidence)`
+        );
+
+        // ── Step 3: Generate Meeting Minutes ──────────────────────────────
+        const mom = await momService.generateMeetingMinutes(transcript, {
+            meetingId,
+            format: 'markdown',   // stored as Markdown; re-render to HTML on demand
+            persist: true,
+        });
+
+        console.log(
+            `[AI Processing] Minutes generated — ${mom.discussionPoints.length} discussion point(s), ` +
+            `${mom.decisions.length} decision(s)`
+        );
+
+        // ── Step 4: Final meeting update ───────────────────────────────────
+        // transcriptUrl set by step 1, summary + minutesOfMeeting set by steps 2–3
+        await prisma.meeting.update({
+            where: { id: meetingId },
+            data:  {},   // all AI fields already persisted by their respective services
+        });
 
         console.log(`[AI Processing] Completed for meeting ${meetingId}`);
     } catch (error) {

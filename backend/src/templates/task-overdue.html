@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Task Overdue</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: #f3f4f6;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #1f2937;
+    }
+
+    .wrapper {
+      max-width: 600px;
+      margin: 32px auto;
+      background: #ffffff;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, .12);
+    }
+
+    .header {
+      background: #dc2626;
+      padding: 28px 32px;
+    }
+
+    .header h1 {
+      margin: 0;
+      color: #ffffff;
+      font-size: 22px;
+      font-weight: 700;
+    }
+
+    .header p {
+      margin: 4px 0 0;
+      color: #fecaca;
+      font-size: 13px;
+    }
+
+    .body {
+      padding: 32px;
+    }
+
+    .body p {
+      margin: 0 0 16px;
+      line-height: 1.6;
+      font-size: 15px;
+    }
+
+    .alert-box {
+      background: #fef2f2;
+      border: 1px solid #fca5a5;
+      border-left: 4px solid #dc2626;
+      border-radius: 4px;
+      padding: 16px 20px;
+      margin: 16px 0;
+    }
+
+    .alert-box .overdue-label {
+      font-size: 14px;
+      font-weight: 700;
+      color: #991b1b;
+      margin-bottom: 4px;
+    }
+
+    .alert-box .overdue-detail {
+      font-size: 13px;
+      color: #b91c1c;
+    }
+
+    .task-card {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      padding: 20px;
+      margin: 20px 0;
+    }
+
+    .task-card h2 {
+      margin: 0 0 12px;
+      font-size: 17px;
+      color: #111827;
+    }
+
+    .meta-row {
+      font-size: 13px;
+      color: #6b7280;
+      margin-bottom: 8px;
+    }
+
+    .meta-row strong {
+      color: #374151;
+      min-width: 80px;
+      display: inline-block;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .badge-high {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+
+    .badge-medium {
+      background: #fef3c7;
+      color: #b45309;
+    }
+
+    .badge-low {
+      background: #d1fae5;
+      color: #065f46;
+    }
+
+    .badge-overdue {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+
+    .cta {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 10px 24px;
+      background: #dc2626;
+      color: #ffffff !important;
+      text-decoration: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .footer {
+      padding: 20px 32px;
+      border-top: 1px solid #e5e7eb;
+      font-size: 12px;
+      color: #9ca3af;
+      text-align: center;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrapper">
+    <div class="header">
+      <h1>&#9888; Task Overdue</h1>
+      <p>AI Meeting Assistant &mdash; Overdue Alert</p>
+    </div>
+    <div class="body">
+      <p>Hi <strong>{{assigneeName}}</strong>,</p>
+      <p>The following task has passed its due date and is now overdue. Please take action as soon as possible.</p>
+
+      <div class="alert-box">
+        <div class="overdue-label">&#128680; OVERDUE</div>
+        <div class="overdue-detail">Was due {{dueDateFormatted}} &mdash; {{overdueBy}} ago</div>
+      </div>
+
+      <div class="task-card">
+        <h2>{{taskTitle}}</h2>
+        {{#taskDescription}}<p style="margin:0 0 12px;font-size:14px;color:#4b5563;">{{taskDescription}}</p>
+        {{/taskDescription}}
+        <div class="meta-row"><strong>Priority:</strong> <span class="badge badge-{{priority}}">{{priority}}</span>
+        </div>
+        <div class="meta-row"><strong>Status:</strong> <span class="badge badge-overdue">Overdue</span></div>
+        {{#meetingTitle}}<div class="meta-row"><strong>Meeting:</strong> {{meetingTitle}}</div>{{/meetingTitle}}
+      </div>
+
+      {{#taskUrl}}<a class="cta" href="{{taskUrl}}">Mark as Complete</a>{{/taskUrl}}
+    </div>
+    <div class="footer">
+      &copy; {{year}} AI Meeting Assistant. You received this alert because a task assigned to you is overdue.
+    </div>
+  </div>
+</body>
+
+</html>

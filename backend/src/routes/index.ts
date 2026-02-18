@@ -12,7 +12,7 @@ import authRoutes from './auth.routes';
 // import userRoutes from './user.routes';
 import workspaceRoutes from './workspace.routes';
 import meetingRoutes from './meeting.routes';
-// import taskRoutes from './task.routes';
+import taskRoutes from './task.routes';
 // import transcriptionRoutes from './transcription.routes';
 // import summaryRoutes from './summary.routes';
 // import actionItemRoutes from './action-item.routes';
@@ -54,7 +54,7 @@ const createV1Router = (): Router => {
     router.use('/meetings', meetingRoutes);
 
     // Task management routes
-    // router.use('/tasks', taskRoutes);
+    router.use('/tasks', taskRoutes);
 
     // Transcription routes (AI transcription services)
     // router.use('/transcriptions', transcriptionRoutes);
