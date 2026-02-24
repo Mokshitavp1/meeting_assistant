@@ -330,7 +330,7 @@ export const notFoundHandler = (
  * Wraps async route handlers to catch errors and pass to error middleware
  */
 export const asyncHandler = (
-    fn: (req: Request, res: Response, next: NextFunction) => Promise<any>
+    fn: (req: Request, res: Response, next: NextFunction) => Promise<void>
 ) => {
     return (req: Request, res: Response, next: NextFunction): void => {
         Promise.resolve(fn(req, res, next)).catch(next);
@@ -341,7 +341,7 @@ export const asyncHandler = (
  * Validation Error Handler
  * Creates a validation error from Zod schema or custom validation
  */
-export const validateRequest = (schema: any) => {
+export const validateRequest = (schema: { parseAsync: (data: unknown) => Promise<unknown> }) => {
     return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
         try {
             await schema.parseAsync({

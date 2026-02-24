@@ -160,6 +160,8 @@ model Meeting {
   @@index([createdById])
   @@index([scheduledStartTime])
   @@index([status])
+  @@index([workspaceId, status])
+  @@index([createdById, status])
   @@map("meetings")
 }
 
@@ -209,8 +211,38 @@ model Task {
   updatedAt   DateTime @updatedAt
   completedAt DateTime?
 
+  // Relations
+  comments    TaskComment[]
+
   @@index([meetingId])
   @@index([assignedToId])
   @@index([status])
+  @@index([priority])
+  @@index([dueDate])
+  @@index([assignedToId, status])
+  @@index([meetingId, status])
   @@map("tasks")
+}
+
+// ============================================
+// TASK COMMENT MODEL
+// ============================================
+
+model TaskComment {
+  id        String   @id @default(cuid())
+  content   String   @db.Text
+  taskId    String
+  userId    String
+  userName  String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([userId])
+  @@index([taskId, createdAt])
+  @@map("task_comments")
 }

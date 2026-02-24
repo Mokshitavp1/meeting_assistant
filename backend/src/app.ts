@@ -19,6 +19,8 @@ import apiRouter from './routes/index';
 
 // Import error handling
 import { errorHandler, notFoundHandler } from './middleware/error.middleware';
+import { requestIdMiddleware } from './middleware/requestId.middleware';
+import logger from './utils/logger';
 
 // Load environment variables
 config();
@@ -176,18 +178,21 @@ const requestLogger = (req: Request, res: Response, next: NextFunction) => {
 
     res.on('finish', () => {
         const duration = Date.now() - start;
-        const log = {
+        const logData = {
             method: req.method,
             url: req.originalUrl,
             status: res.statusCode,
             duration: `${duration}ms`,
             ip: req.ip,
-            userAgent: req.get('user-agent'),
-            timestamp: new Date().toISOString(),
+            requestId: req.requestId,
         };
 
-        if (process.env.NODE_ENV === 'development') {
-            console.log(JSON.stringify(log, null, 2));
+        if (res.statusCode >= 400) {
+            logger.warn('Request completed with error', logData);
+        } else if (duration > 1000) {
+            logger.warn('Slow request detected', logData);
+        } else {
+            logger.debug('Request completed', logData);
         }
     });
 
@@ -202,6 +207,9 @@ const createApp = (): Application => {
 
     // Trust proxy - important for rate limiting behind reverse proxy
     app.set('trust proxy', 1);
+
+    // Request ID for distributed tracing
+    app.use(requestIdMiddleware);
 
     // Security middleware - Helmet
     if (process.env.HELMET_ENABLED !== 'false') {

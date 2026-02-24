@@ -4,6 +4,8 @@ import { config } from 'dotenv';
 import app, { corsOptions } from './app';
 import { DatabaseClient } from './config/database';
 import { RedisClient } from './config/redis';
+import { socketAuthMiddleware, getSocketUser } from './websocket/auth.middleware';
+import logger from './utils/logger';
 
 // Load environment variables
 config();
@@ -56,7 +58,7 @@ function setupSocketIO(): void {
 
     // Handle Socket.IO server errors
     io.engine.on('connection_error', (err) => {
-        console.error('Socket.IO connection error:', err);
+        logger.error('Socket.IO connection error:', { error: err.message ?? String(err) });
     });
 }
 
@@ -64,20 +66,20 @@ function setupSocketIO(): void {
  * Initialize all services (Database, Redis, etc.)
  */
 async function initializeServices(): Promise<void> {
-    console.log('Initializing services...');
+    logger.info('Initializing services...');
 
     try {
         // Connect to PostgreSQL
-        console.log('Connecting to PostgreSQL...');
+        logger.info('Connecting to PostgreSQL...');
         await DatabaseClient.connect();
 
         // Connect to Redis
-        console.log('Connecting to Redis...');
+        logger.info('Connecting to Redis...');
         await RedisClient.connect();
 
-        console.log('✓ All services initialized successfully');
+        logger.info('All services initialized successfully');
     } catch (error) {
-        console.error('✗ Failed to initialize services:', error);
+        logger.error('Failed to initialize services:', { error });
         throw error;
     }
 }
@@ -87,24 +89,24 @@ async function initializeServices(): Promise<void> {
  */
 function startServer(): void {
     server.listen(PORT, HOST, () => {
-        console.log('='.repeat(50));
-        console.log('🚀 Server started successfully!');
-        console.log('='.repeat(50));
-        console.log(`Environment: ${NODE_ENV}`);
-        console.log(`Server running at: http://${HOST}:${PORT}`);
-        console.log(`Health check: http://${HOST}:${PORT}/health`);
-        console.log(`Socket.IO enabled: Yes`);
-        console.log('='.repeat(50));
+        logger.info('='.repeat(50));
+        logger.info('Server started successfully!');
+        logger.info('='.repeat(50));
+        logger.info(`Environment: ${NODE_ENV}`);
+        logger.info(`Server running at: http://${HOST}:${PORT}`);
+        logger.info(`Health check: http://${HOST}:${PORT}/health`);
+        logger.info(`Socket.IO enabled: Yes (authenticated)`);
+        logger.info('='.repeat(50));
     });
 
     // Handle server errors
     server.on('error', (error: NodeJS.ErrnoException) => {
         if (error.code === 'EADDRINUSE') {
-            console.error(`✗ Port ${PORT} is already in use`);
+            logger.error(`Port ${PORT} is already in use`);
         } else if (error.code === 'EACCES') {
-            console.error(`✗ Port ${PORT} requires elevated privileges`);
+            logger.error(`Port ${PORT} requires elevated privileges`);
         } else {
-            console.error('✗ Server error:', error);
+            logger.error('Server error:', { error });
         }
         process.exit(1);
     });
@@ -114,38 +116,38 @@ function startServer(): void {
  * Graceful shutdown handler
  */
 async function gracefulShutdown(signal: string): Promise<void> {
-    console.log(`\n${signal} received. Starting graceful shutdown...`);
+    logger.info(`${signal} received. Starting graceful shutdown...`);
 
     // Stop accepting new connections
     server.close(async () => {
-        console.log('HTTP server closed');
+        logger.info('HTTP server closed');
 
         try {
             // Close Socket.IO connections
-            console.log('Closing Socket.IO connections...');
+            logger.info('Closing Socket.IO connections...');
             io.close(() => {
-                console.log('✓ Socket.IO server closed');
+                logger.info('Socket.IO server closed');
             });
 
             // Disconnect from Redis
-            console.log('Disconnecting from Redis...');
+            logger.info('Disconnecting from Redis...');
             await RedisClient.disconnect();
 
             // Disconnect from Database
-            console.log('Disconnecting from database...');
+            logger.info('Disconnecting from database...');
             await DatabaseClient.disconnect();
 
-            console.log('✓ Graceful shutdown completed');
+            logger.info('Graceful shutdown completed');
             process.exit(0);
         } catch (error) {
-            console.error('✗ Error during graceful shutdown:', error);
+            logger.error('Error during graceful shutdown:', { error });
             process.exit(1);
         }
     });
 
     // Force shutdown after timeout
     setTimeout(() => {
-        console.error('Forced shutdown due to timeout');
+        logger.error('Forced shutdown due to timeout');
         process.exit(1);
     }, 10000); // 10 seconds timeout
 }
@@ -161,19 +163,19 @@ function setupProcessHandlers(): void {
 
     // Handle uncaught exceptions
     process.on('uncaughtException', async (error: Error) => {
-        console.error('Uncaught Exception:', error);
+        logger.error('Uncaught Exception:', { error: error.message, stack: error.stack });
         await gracefulShutdown('uncaughtException');
     });
 
     // Handle unhandled promise rejections
     process.on('unhandledRejection', async (reason: any, promise: Promise<any>) => {
-        console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+        logger.error('Unhandled Rejection:', { reason });
         await gracefulShutdown('unhandledRejection');
     });
 
     // Log process warnings
     process.on('warning', (warning: Error) => {
-        console.warn('Process Warning:', warning.name, warning.message);
+        logger.warn('Process Warning:', { name: warning.name, message: warning.message });
     });
 }
 
@@ -182,9 +184,9 @@ function setupProcessHandlers(): void {
  */
 async function bootstrap(): Promise<void> {
     try {
-        console.log('Starting AI Meeting Assistant Server...');
-        console.log(`Node.js version: ${process.version}`);
-        console.log(`Environment: ${NODE_ENV}`);
+        logger.info('Starting AI Meeting Assistant Server...');
+        logger.info(`Node.js version: ${process.version}`);
+        logger.info(`Environment: ${NODE_ENV}`);
 
         // Setup Socket.IO
         setupSocketIO();
@@ -198,7 +200,7 @@ async function bootstrap(): Promise<void> {
         // Start the server
         startServer();
     } catch (error) {
-        console.error('✗ Failed to start server:', error);
+        logger.error('Failed to start server:', { error });
         process.exit(1);
     }
 }

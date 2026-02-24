@@ -257,7 +257,13 @@ async function callOpenAI(prompt: string, model: string, temperature: number): P
         throw new ExternalServiceError('OpenAI', `OpenAI API error: ${response.status} ${details}`);
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as {
+        choices?: Array<{
+            message?: {
+                content?: string;
+            };
+        }>;
+    };
     const content = data?.choices?.[0]?.message?.content;
 
     if (typeof content !== 'string' || !content.trim()) {
@@ -294,12 +300,17 @@ async function callAnthropic(prompt: string, model: string, temperature: number)
         throw new ExternalServiceError('Anthropic', `Anthropic API error: ${response.status} ${details}`);
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as {
+        content?: Array<{
+            type?: string;
+            text?: string;
+        }>;
+    };
 
     const textBlocks: string[] = Array.isArray(data?.content)
         ? data.content
-            .filter((block: any) => block?.type === 'text' && typeof block?.text === 'string')
-            .map((block: any) => block.text)
+            .filter((block) => block?.type === 'text' && typeof block?.text === 'string')
+            .map((block) => block.text as string)
         : [];
 
     const content = textBlocks.join('\n').trim();

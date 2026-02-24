@@ -9,18 +9,9 @@ import { Router } from 'express';
 // Note: Uncomment and create the corresponding route files as needed
 
 import authRoutes from './auth.routes';
-// import userRoutes from './user.routes';
 import workspaceRoutes from './workspace.routes';
 import meetingRoutes from './meeting.routes';
-// import taskRoutes from './task.routes';
-// import transcriptionRoutes from './transcription.routes';
-// import summaryRoutes from './summary.routes';
-// import actionItemRoutes from './action-item.routes';
-// import integrationRoutes from './integration.routes';
-// import notificationRoutes from './notification.routes';
-// import searchRoutes from './search.routes';
-// import analyticsRoutes from './analytics.routes';
-// import settingsRoutes from './settings.routes';
+import taskRoutes from './task.routes';
 
 // Import middleware
 import { authLimiter } from '../app';
@@ -54,7 +45,7 @@ const createV1Router = (): Router => {
     router.use('/meetings', meetingRoutes);
 
     // Task management routes
-    // router.use('/tasks', taskRoutes);
+    router.use('/tasks', taskRoutes);
 
     // Transcription routes (AI transcription services)
     // router.use('/transcriptions', transcriptionRoutes);

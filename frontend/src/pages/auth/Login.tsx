@@ -3,7 +3,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { Link, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
-import apiClient from "../../api/axios.config";
 import { useAuthStore } from "../../store/authStore";
 
 // 1. Zod Validation Schema
@@ -17,19 +16,15 @@ type LoginForm = z.infer<typeof loginSchema>;
 const Login = () => {
   const navigate = useNavigate();
   const login = useAuthStore((state) => state.login);
-  
+
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
   });
 
   const onSubmit = async (data: LoginForm) => {
     try {
-      // Call backend
-      const response = await apiClient.post("/auth/login", data);
-      
-      // Save to store
-      login(response.data.user, response.data.accessToken);
-      
+      await login(data.email, data.password);
+
       toast.success("Login successful!");
       navigate("/dashboard");
     } catch (error: any) {

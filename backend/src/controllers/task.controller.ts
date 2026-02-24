@@ -7,20 +7,12 @@ import {
     BadRequestError,
     NotFoundError,
 } from '../middleware/error.middleware';
+import type { AuthUser } from '../middleware/auth.middleware';
 import * as workspaceService from '../services/workspace.service';
 
+type AuthenticatedRequest = Request & { user?: AuthUser };
+
 type TaskStatus = 'pending' | 'in_progress' | 'completed';
-
-interface TaskComment {
-    id: string;
-    taskId: string;
-    userId: string;
-    userName: string;
-    content: string;
-    createdAt: string;
-}
-
-const taskCommentsStore = new Map<string, TaskComment[]>();
 
 const listTasksSchema = z.object({
     assignee: z.string().optional(),
@@ -181,7 +173,7 @@ function getParamId(value: string | string[] | undefined): string {
 }
 
 export const listTasks = asyncHandler(
-    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
         if (!req.user) {
             throw new AuthorizationError('Authentication required');
         }
@@ -264,7 +256,7 @@ export const listTasks = asyncHandler(
 );
 
 export const createTask = asyncHandler(
-    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
         if (!req.user) {
             throw new AuthorizationError('Authentication required');
         }
@@ -325,14 +317,17 @@ export const createTask = asyncHandler(
 );
 
 export const getTaskById = asyncHandler(
-    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
         if (!req.user) {
             throw new AuthorizationError('Authentication required');
         }
 
         const taskId = getParamId(req.params.id);
         const task = await getTaskWithAccess(taskId, req.user.id, req.user.role);
-        const comments = taskCommentsStore.get(task.id) || [];
+        const comments = await prisma.taskComment.findMany({
+            where: { taskId: task.id },
+            orderBy: { createdAt: 'asc' },
+        });
 
         res.status(200).json({
             success: true,
@@ -347,7 +342,7 @@ export const getTaskById = asyncHandler(
 );
 
 export const updateTask = asyncHandler(
-    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
         if (!req.user) {
             throw new AuthorizationError('Authentication required');
         }
@@ -414,7 +409,7 @@ export const updateTask = asyncHandler(
 );
 
 export const deleteTask = asyncHandler(
-    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
         if (!req.user) {
             throw new AuthorizationError('Authentication required');
         }
@@ -427,7 +422,6 @@ export const deleteTask = asyncHandler(
         }
 
         await prisma.task.delete({ where: { id: task.id } });
-        taskCommentsStore.delete(task.id);
 
         res.status(200).json({
             success: true,
@@ -437,7 +431,7 @@ export const deleteTask = asyncHandler(
 );
 
 export const updateTaskStatus = asyncHandler(
-    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
         if (!req.user) {
             throw new AuthorizationError('Authentication required');
         }
@@ -491,7 +485,7 @@ export const updateTaskStatus = asyncHandler(
 );
 
 export const bulkConfirmTasks = asyncHandler(
-    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
         if (!req.user) {
             throw new AuthorizationError('Authentication required');
         }
@@ -555,7 +549,7 @@ export const bulkConfirmTasks = asyncHandler(
 );
 
 export const addComment = asyncHandler(
-    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
         if (!req.user) {
             throw new AuthorizationError('Authentication required');
         }
@@ -564,18 +558,14 @@ export const addComment = asyncHandler(
         const task = await getTaskWithAccess(taskId, req.user.id, req.user.role);
         const { content } = addCommentSchema.parse(req.body);
 
-        const comments = taskCommentsStore.get(task.id) || [];
-        const comment: TaskComment = {
-            id: `comment_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-            taskId: task.id,
-            userId: req.user.id,
-            userName: req.user.name || req.user.email,
-            content,
-            createdAt: new Date().toISOString(),
-        };
-
-        comments.push(comment);
-        taskCommentsStore.set(task.id, comments);
+        const comment = await prisma.taskComment.create({
+            data: {
+                taskId: task.id,
+                userId: req.user.id,
+                userName: req.user.name || req.user.email,
+                content,
+            },
+        });
 
         res.status(201).json({
             success: true,
@@ -586,14 +576,17 @@ export const addComment = asyncHandler(
 );
 
 export const getComments = asyncHandler(
-    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
         if (!req.user) {
             throw new AuthorizationError('Authentication required');
         }
 
         const taskId = getParamId(req.params.id);
         const task = await getTaskWithAccess(taskId, req.user.id, req.user.role);
-        const comments = taskCommentsStore.get(task.id) || [];
+        const comments = await prisma.taskComment.findMany({
+            where: { taskId: task.id },
+            orderBy: { createdAt: 'asc' },
+        });
 
         res.status(200).json({
             success: true,

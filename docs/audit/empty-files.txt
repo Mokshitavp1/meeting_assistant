@@ -1,0 +1,9 @@
+.\frontend\.env.example
+.\frontend\postcss.config.js
+.\frontend\tailwind.config.js
+.\frontend\tsconfig.json
+.\frontend\vite.config.ts
+.\frontend\src\types\common.types.ts
+.\frontend\src\types\meeting.types.ts
+.\frontend\src\types\task.types.ts
+.\frontend\src\types\workspace.types.ts

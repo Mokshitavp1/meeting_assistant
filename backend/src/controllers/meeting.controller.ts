@@ -45,6 +45,21 @@ const listMeetingsSchema = z.object({
     limit: z.string().optional().default('20'),
 });
 
+function getParamId(value: string | string[] | undefined): string {
+    if (!value) {
+        throw new BadRequestError('Meeting id is required');
+    }
+
+    if (Array.isArray(value)) {
+        if (!value[0]) {
+            throw new BadRequestError('Meeting id is required');
+        }
+        return value[0];
+    }
+
+    return value;
+}
+
 /**
  * List Meetings - Get meetings with filters
  * GET /api/v1/meetings
@@ -201,7 +216,7 @@ export const getMeetingById = asyncHandler(
             throw new AuthorizationError('Authentication required');
         }
 
-        const { id } = req.params;
+        const id = getParamId(req.params.id);
 
         // Get meeting with all details using service
         const meeting = await meetingService.getMeetingWithDetails(id, req.user.id);
@@ -225,7 +240,7 @@ export const updateMeeting = asyncHandler(
             throw new AuthorizationError('Authentication required');
         }
 
-        const { id } = req.params;
+        const id = getParamId(req.params.id);
 
         // Validate input
         const validatedData = updateMeetingSchema.parse(req.body);
@@ -266,7 +281,7 @@ export const deleteMeeting = asyncHandler(
             throw new AuthorizationError('Authentication required');
         }
 
-        const { id } = req.params;
+        const id = getParamId(req.params.id);
 
         // Delete meeting using service (handles file cleanup and permissions)
         await meetingService.deleteMeeting(id, req.user.id);
@@ -288,7 +303,7 @@ export const startMeeting = asyncHandler(
             throw new AuthorizationError('Authentication required');
         }
 
-        const { id } = req.params;
+        const id = getParamId(req.params.id);
 
         // Update meeting status to in_progress using service
         const updatedMeeting = await meetingService.updateMeetingStatus(
@@ -317,7 +332,7 @@ export const endMeeting = asyncHandler(
             throw new AuthorizationError('Authentication required');
         }
 
-        const { id } = req.params;
+        const id = getParamId(req.params.id);
 
         // Update meeting status to completed using service
         const updatedMeeting = await meetingService.updateMeetingStatus(
@@ -347,7 +362,7 @@ export const uploadRecording = asyncHandler(
             throw new AuthorizationError('Authentication required');
         }
 
-        const { id } = req.params;
+        const id = getParamId(req.params.id);
 
         if (!req.file) {
             throw new BadRequestError('No recording file uploaded');
@@ -383,10 +398,10 @@ export const getTranscript = asyncHandler(
             throw new AuthorizationError('Authentication required');
         }
 
-        const { id } = req.params;
+        const id = getParamId(req.params.id);
 
         // Verify access
-        await verifyMeetingAccess(id, req.user.id);
+        await meetingService.getMeetingWithDetails(id, req.user.id);
 
         const meeting = await prisma.meeting.findUnique({
             where: { id },
@@ -427,7 +442,7 @@ export const processMeeting = asyncHandler(
             throw new AuthorizationError('Authentication required');
         }
 
-        const { id } = req.params;
+        const id = getParamId(req.params.id);
 
         // Trigger AI processing using service
         await meetingService.triggerAIProcessing(id, req.user.id);

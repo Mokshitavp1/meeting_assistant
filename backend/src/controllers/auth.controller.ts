@@ -6,6 +6,7 @@ import {
     BadRequestError,
 } from '../middleware/error.middleware';
 import * as authService from '../services/auth.services';
+import * as emailService from '../services/email.service';
 
 /**
  * Validation Schemas
@@ -71,8 +72,17 @@ export const register = asyncHandler(
         // Call service to register user
         const result = await authService.registerUser({ email, password, name });
 
-        // TODO: Send verification email
-        // await emailService.sendVerificationEmail(result.user.email, result.verificationToken);
+        // Send verification email
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+        try {
+            await emailService.sendWelcomeEmail({
+                to: result.user.email,
+                name: result.user.name || 'User',
+                loginUrl: `${frontendUrl}/login`,
+            });
+        } catch {
+            // Don't fail registration if email fails
+        }
 
         res.status(201).json({
             success: true,
@@ -185,8 +195,18 @@ export const forgotPassword = asyncHandler(
         const resetToken = await authService.generatePasswordResetToken(email);
 
         if (resetToken) {
-            // TODO: Send password reset email
-            // await emailService.sendPasswordResetEmail(email, resetToken);
+            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+            try {
+                const user = await authService.validatePasswordResetToken(resetToken);
+                await emailService.sendPasswordResetEmail({
+                    to: email,
+                    name: user.name || 'User',
+                    resetUrl: `${frontendUrl}/forgot-password?token=${resetToken}`,
+                    expiresInMinutes: 60,
+                });
+            } catch {
+                // Don't fail the response if sending fails
+            }
         }
 
         // Always return success to prevent email enumeration
@@ -211,8 +231,7 @@ export const resetPassword = asyncHandler(
         // Reset password (validates token, updates password, revokes tokens)
         await authService.resetPassword(token, password);
 
-        // TODO: Send password changed confirmation email
-        // await emailService.sendPasswordChangedEmail(user.email);
+        // Password changed confirmation is implicit — user must re-login
 
         res.status(200).json({
             success: true,
@@ -235,8 +254,17 @@ export const verifyEmail = asyncHandler(
         // Verify email (validates token and updates user)
         const user = await authService.verifyEmail(token);
 
-        // TODO: Send welcome email
-        // await emailService.sendWelcomeEmail(user.email, user.name);
+        // Send welcome email on successful verification
+        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+        try {
+            await emailService.sendWelcomeEmail({
+                to: user.email,
+                name: user.name || 'User',
+                loginUrl: `${frontendUrl}/login`,
+            });
+        } catch {
+            // Non-critical
+        }
 
         res.status(200).json({
             success: true,

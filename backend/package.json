@@ -29,6 +29,8 @@
     "author": "",
     "license": "ISC",
     "dependencies": {
+        "@aws-sdk/client-s3": "^3.996.0",
+        "@aws-sdk/s3-request-presigner": "^3.996.0",
         "@bull-board/api": "^5.21.4",
         "@bull-board/express": "^5.21.4",
         "@prisma/client": "^5.22.0",

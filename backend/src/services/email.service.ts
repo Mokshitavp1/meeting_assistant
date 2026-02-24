@@ -40,6 +40,13 @@ export interface EmailStatusRecord {
     updatedAt: string;
 }
 
+export interface RenderedEmailPayload {
+    to: string;
+    subject: string;
+    html: string;
+    from?: string;
+}
+
 interface ProviderConfig {
     provider: EmailProvider;
     fromEmail: string;
@@ -482,6 +489,36 @@ export async function sendPasswordResetEmail(data: {
             resetUrl: data.resetUrl,
             expiresInMinutes: data.expiresInMinutes || 60,
         },
+    });
+}
+
+export async function sendRenderedEmail(payload: RenderedEmailPayload): Promise<void> {
+    if (!providerConfig) {
+        await configureEmailProvider();
+    }
+
+    const config = ensureProviderConfigured();
+    const from = payload.from || getFromAddress(config);
+
+    if (config.provider === 'sendgrid') {
+        await sgMail.send({
+            to: payload.to,
+            from,
+            subject: payload.subject,
+            html: payload.html,
+        });
+        return;
+    }
+
+    if (!transporter) {
+        throw new ExternalServiceError('Email', 'Nodemailer transporter is not configured');
+    }
+
+    await transporter.sendMail({
+        to: payload.to,
+        from,
+        subject: payload.subject,
+        html: payload.html,
     });
 }
 

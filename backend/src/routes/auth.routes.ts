@@ -73,17 +73,36 @@ router.post('/verify-email', verifyEmail);
  */
 router.post('/resend-verification', async (req: Request, res: Response, next: NextFunction) => {
     try {
-        // TODO: Implement resend verification logic
-        // 1. Validate email
-        // 2. Find user by email
-        // 3. Check if already verified
-        // 4. Generate new verification token
-        // 5. Send verification email
-        // 6. Return success message
+        const { z } = await import('zod');
+        const authService = await import('../services/auth.services');
+        const emailService = await import('../services/email.service');
 
+        const schema = z.object({
+            email: z.string().email('Invalid email address'),
+        });
+
+        const { email } = schema.parse(req.body);
+
+        const verificationToken = await authService.generateEmailVerificationToken(email);
+
+        if (verificationToken) {
+            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+            try {
+                // Use the welcome template with a verification CTA for now
+                await emailService.sendWelcomeEmail({
+                    to: email,
+                    name: 'User',
+                    loginUrl: `${frontendUrl}/verify-email?token=${verificationToken}`,
+                });
+            } catch {
+                // Don't fail if email sending fails
+            }
+        }
+
+        // Always return success to prevent email enumeration
         res.json({
             success: true,
-            message: 'Verification email sent',
+            message: 'If an unverified account exists, a verification email has been sent',
         });
     } catch (error) {
         next(error);
@@ -95,17 +114,46 @@ router.post('/resend-verification', async (req: Request, res: Response, next: Ne
  * @desc    Get current authenticated user
  * @access  Private
  */
-router.get('/me', async (req: Request, res: Response, next: NextFunction) => {
+router.get('/me', authenticate, async (req: Request, res: Response, next: NextFunction) => {
     try {
-        // TODO: Implement get current user logic
-        // 1. Authenticate user
-        // 2. Get user from database
-        // 3. Return user data (exclude sensitive fields)
+        if (!req.user) {
+            res.status(401).json({ success: false, message: 'Authentication required' });
+            return;
+        }
+
+        const { prisma } = await import('../config/database');
+
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                isEmailVerified: true,
+                createdAt: true,
+                lastLoginAt: true,
+            },
+        });
+
+        if (!user) {
+            res.status(404).json({ success: false, message: 'User not found' });
+            return;
+        }
 
         res.json({
             success: true,
             data: {
-                // user: { ... },
+                user: {
+                    id: user.id,
+                    email: user.email,
+                    fullName: user.name,
+                    name: user.name,
+                    role: user.role?.toUpperCase() ?? 'MEMBER',
+                    isEmailVerified: user.isEmailVerified,
+                    createdAt: user.createdAt,
+                    lastLoginAt: user.lastLoginAt,
+                },
             },
         });
     } catch (error) {
@@ -118,18 +166,28 @@ router.get('/me', async (req: Request, res: Response, next: NextFunction) => {
  * @desc    Change password for authenticated user
  * @access  Private
  */
-router.put('/change-password', async (req: Request, res: Response, next: NextFunction) => {
+router.put('/change-password', authenticate, async (req: Request, res: Response, next: NextFunction) => {
     try {
-        // TODO: Implement change password logic
-        // 1. Authenticate user
-        // 2. Validate current password
-        // 3. Verify current password matches
-        // 4. Validate new password
-        // 5. Hash new password
-        // 6. Update password
-        // 7. Invalidate all existing tokens (optional)
-        // 8. Send confirmation email
-        // 9. Return success message
+        if (!req.user) {
+            res.status(401).json({ success: false, message: 'Authentication required' });
+            return;
+        }
+
+        const { z } = await import('zod');
+        const authService = await import('../services/auth.services');
+
+        const schema = z.object({
+            currentPassword: z.string().min(1, 'Current password is required'),
+            newPassword: z.string()
+                .min(8, 'Password must be at least 8 characters')
+                .regex(/[A-Z]/, 'Must contain uppercase letter')
+                .regex(/[a-z]/, 'Must contain lowercase letter')
+                .regex(/[0-9]/, 'Must contain a number'),
+        });
+
+        const { currentPassword, newPassword } = schema.parse(req.body);
+
+        await authService.changePassword(req.user.id, currentPassword, newPassword);
 
         res.json({
             success: true,

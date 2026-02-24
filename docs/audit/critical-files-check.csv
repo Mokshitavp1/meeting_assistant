@@ -1,0 +1,8 @@
+"File","Exists"
+".gitignore","True"
+".env.example","False"
+"backend\.env.example","True"
+"frontend\.env.example","True"
+"backend\tsconfig.json","False"
+"frontend\tsconfig.json","True"
+"backend\prisma\schema.prisma","True"

@@ -1,0 +1,148 @@
+version: '3.9'
+
+services:
+  # PostgreSQL database service
+  # - Persists data in a named Docker volume
+  # - Exposes port 5432 for local DB tools
+  postgres:
+    image: postgres:16-alpine
+    container_name: meeting-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: meeting_assistant
+      POSTGRES_USER: meeting_user
+      POSTGRES_PASSWORD: meeting_password
+      TZ: UTC
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U meeting_user -d meeting_assistant" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+    networks:
+      - meeting_network
+
+  # Redis cache / queue backend service
+  # - Used by BullMQ jobs, caching, token blacklists, etc.
+  redis:
+    image: redis:7-alpine
+    container_name: meeting-redis
+    restart: unless-stopped
+    command: >
+      redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+    networks:
+      - meeting_network
+
+  # Backend API service (Node.js / Express)
+  # - Runs in development mode with source code bind mounted
+  # - Depends on healthy postgres + redis
+  backend:
+    image: node:20-alpine
+    container_name: meeting-backend
+    restart: unless-stopped
+    working_dir: /app
+    command: sh -c "npm install ; npm run dev"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      DATABASE_URL: postgresql://meeting_user:meeting_password@postgres:5432/meeting_assistant
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_ACCESS_SECRET: dev_access_secret_change_me_32chars!
+      JWT_REFRESH_SECRET: dev_refresh_secret_change_me_32ch!
+      JWT_ISSUER: ai-meeting-assistant
+      JWT_AUDIENCE: api
+      CORS_ALLOWED_ORIGINS: http://localhost:5173,http://localhost:8080
+      RATE_LIMIT_ENABLED: "false"
+      LOG_LEVEL: debug
+      TZ: UTC
+    ports:
+      - "4000:4000"
+    volumes:
+      - ../backend:/app
+      - backend_node_modules:/app/node_modules
+      - ../backend/uploads:/app/uploads
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- http://localhost:4000/health > /dev/null || exit 1" ]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.5'
+    networks:
+      - meeting_network
+
+  # Frontend service (Nginx serving React production build)
+  # - Expects React build output in ../frontend/dist
+  # - For development, keep frontend source mounted for quick rebuilds
+  #   (run npm install && npm run build in ../frontend when files change)
+  frontend:
+    image: nginx:1.27-alpine
+    container_name: meeting-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      NGINX_PORT: 80
+      TZ: UTC
+    ports:
+      - "8080:80"
+    volumes:
+      - ../frontend/dist:/usr/share/nginx/html:ro
+      - ../frontend:/workspace/frontend:ro
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- http://localhost/ > /dev/null || exit 1" ]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - meeting_network
+
+networks:
+  # Shared bridge network for inter-service communication
+  meeting_network:
+    name: meeting_network
+    driver: bridge
+
+volumes:
+  # Persistent PostgreSQL data volume
+  postgres_data: # Persistent Redis append-only data volume
+
+  redis_data: # Isolated node_modules volume for backend container
+
+  backend_node_modules:

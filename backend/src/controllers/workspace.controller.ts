@@ -38,6 +38,14 @@ const updateMemberRoleSchema = z.object({
     role: z.enum(['admin', 'member']),
 });
 
+const getRouteParam = (value: string | string[] | undefined, paramName: string): string => {
+    if (typeof value === 'string' && value.trim()) {
+        return value;
+    }
+
+    throw new AuthorizationError(`Invalid or missing route parameter: ${paramName}`);
+};
+
 /**
  * List Workspaces - Get all workspaces for current user
  * GET /api/v1/workspaces
@@ -102,7 +110,7 @@ export const getWorkspaceById = asyncHandler(
             throw new AuthorizationError('Authentication required');
         }
 
-        const { id } = req.params;
+        const id = getRouteParam(req.params.id, 'id');
 
         // Verify user has access to workspace
         await workspaceService.verifyWorkspaceAccess(id, req.user.id);
@@ -128,7 +136,7 @@ export const updateWorkspace = asyncHandler(
             throw new AuthorizationError('Authentication required');
         }
 
-        const { id } = req.params;
+        const id = getRouteParam(req.params.id, 'id');
 
         // Validate input
         const validatedData = updateWorkspaceSchema.parse(req.body);
@@ -156,7 +164,7 @@ export const deleteWorkspace = asyncHandler(
             throw new AuthorizationError('Authentication required');
         }
 
-        const { id } = req.params;
+        const id = getRouteParam(req.params.id, 'id');
 
         // Delete workspace (service checks admin permission)
         await workspaceService.deleteWorkspace(id, req.user.id);
@@ -178,7 +186,7 @@ export const generateInviteCodeEndpoint = asyncHandler(
             throw new AuthorizationError('Authentication required');
         }
 
-        const { id } = req.params;
+        const id = getRouteParam(req.params.id, 'id');
 
         // Generate new invite code (service checks admin permission)
         const inviteCode = await workspaceService.regenerateInviteCode(id, req.user.id);
@@ -235,7 +243,7 @@ export const listMembers = asyncHandler(
             throw new AuthorizationError('Authentication required');
         }
 
-        const { id } = req.params;
+        const id = getRouteParam(req.params.id, 'id');
 
         // Get members (service checks membership)
         const members = await workspaceService.getWorkspaceMembers(id, req.user.id);
@@ -260,7 +268,7 @@ export const addMember = asyncHandler(
             throw new AuthorizationError('Authentication required');
         }
 
-        const { id } = req.params;
+        const id = getRouteParam(req.params.id, 'id');
 
         // Validate input
         const validatedData = addMemberSchema.parse(req.body);
@@ -297,7 +305,8 @@ export const updateMemberRole = asyncHandler(
             throw new AuthorizationError('Authentication required');
         }
 
-        const { id, memberId } = req.params;
+        const id = getRouteParam(req.params.id, 'id');
+        const memberId = getRouteParam(req.params.memberId, 'memberId');
 
         // Validate input
         const validatedData = updateMemberRoleSchema.parse(req.body);
@@ -327,7 +336,8 @@ export const removeMember = asyncHandler(
             throw new AuthorizationError('Authentication required');
         }
 
-        const { id, memberId } = req.params;
+        const id = getRouteParam(req.params.id, 'id');
+        const memberId = getRouteParam(req.params.memberId, 'memberId');
 
         // Remove member (service checks admin permission and last admin protection)
         await workspaceService.removeMember(id, memberId, req.user.id);

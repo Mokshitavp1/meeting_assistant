@@ -71,7 +71,7 @@ export function generateAccessToken(userId: string, email: string): string {
     };
 
     const options: SignOptions = {
-        expiresIn: TOKEN_EXPIRATION.ACCESS_TOKEN,
+        expiresIn: TOKEN_EXPIRATION.ACCESS_TOKEN as SignOptions['expiresIn'],
         issuer: process.env.JWT_ISSUER || 'ai-meeting-assistant',
         audience: process.env.JWT_AUDIENCE || 'api',
     };
@@ -97,7 +97,7 @@ export function generateRefreshToken(userId: string): string {
     };
 
     const options: SignOptions = {
-        expiresIn: TOKEN_EXPIRATION.REFRESH_TOKEN,
+        expiresIn: TOKEN_EXPIRATION.REFRESH_TOKEN as SignOptions['expiresIn'],
         issuer: process.env.JWT_ISSUER || 'ai-meeting-assistant',
         audience: process.env.JWT_AUDIENCE || 'api',
     };

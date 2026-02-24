@@ -166,9 +166,11 @@ async function getAuthorizedCalendarClient(userId: string): Promise<calendar_v3.
 
     const latestCredentials = oauth2Client.credentials;
     const mergedTokens: GoogleCalendarTokens = {
-        ...storedTokens,
-        ...latestCredentials,
-        refresh_token: latestCredentials.refresh_token || storedTokens.refresh_token,
+        access_token: latestCredentials.access_token ?? storedTokens.access_token,
+        refresh_token: latestCredentials.refresh_token ?? storedTokens.refresh_token,
+        scope: latestCredentials.scope ?? storedTokens.scope,
+        token_type: latestCredentials.token_type ?? storedTokens.token_type,
+        expiry_date: latestCredentials.expiry_date ?? storedTokens.expiry_date,
     };
 
     await storeUserTokens(userId, mergedTokens);
@@ -250,9 +252,11 @@ export async function handleGoogleOAuthCallback(
 
         const existingTokens = await getUserTokens(userId);
         const mergedTokens: GoogleCalendarTokens = {
-            ...existingTokens,
-            ...tokens,
-            refresh_token: tokens.refresh_token || existingTokens?.refresh_token,
+            access_token: tokens.access_token ?? existingTokens?.access_token,
+            refresh_token: tokens.refresh_token ?? existingTokens?.refresh_token,
+            scope: tokens.scope ?? existingTokens?.scope,
+            token_type: tokens.token_type ?? existingTokens?.token_type,
+            expiry_date: tokens.expiry_date ?? existingTokens?.expiry_date,
         };
 
         await storeUserTokens(userId, mergedTokens);
@@ -394,8 +398,8 @@ export async function startGoogleCalendarWatch(
             `${CHANNEL_KEY_PREFIX}${channelId}`,
             {
                 userId: input.userId,
-                resourceId: response.data.resourceId,
-                expiration: response.data.expiration,
+                resourceId: response.data.resourceId ?? undefined,
+                expiration: response.data.expiration ?? undefined,
             } satisfies ChannelMetadata,
             DATA_TTL_SECONDS
         );
