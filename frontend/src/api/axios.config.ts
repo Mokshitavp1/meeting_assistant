@@ -6,8 +6,11 @@ import axios, {
 } from "axios";
 
 interface RefreshTokenResponse {
-  accessToken: string;
-  refreshToken?: string;
+  success: boolean;
+  data: {
+    accessToken: string;
+    refreshToken?: string;
+  };
 }
 
 interface RetryableRequestConfig extends InternalAxiosRequestConfig {
@@ -64,6 +67,7 @@ const setAuthorizationHeader = (config: InternalAxiosRequestConfig, token: strin
 const clearAuthAndRedirect = () => {
   localStorage.removeItem("token");
   localStorage.removeItem("refreshToken");
+  localStorage.removeItem("meeting-auth-storage");
 
   if (window.location.pathname !== "/login") {
     window.location.href = "/login";
@@ -128,17 +132,18 @@ apiClient.interceptors.response.use(
         }
       );
 
-      if (!data?.accessToken) {
+      const tokens = data?.data;
+      if (!tokens?.accessToken) {
         throw new Error("No access token returned from refresh endpoint");
       }
 
-      localStorage.setItem("token", data.accessToken);
-      if (data.refreshToken) {
-        localStorage.setItem("refreshToken", data.refreshToken);
+      localStorage.setItem("token", tokens.accessToken);
+      if (tokens.refreshToken) {
+        localStorage.setItem("refreshToken", tokens.refreshToken);
       }
 
-      processQueue(null, data.accessToken);
-      setAuthorizationHeader(originalRequest, data.accessToken);
+      processQueue(null, tokens.accessToken);
+      setAuthorizationHeader(originalRequest, tokens.accessToken);
 
       return apiClient(originalRequest);
     } catch (refreshError) {

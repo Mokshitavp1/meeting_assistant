@@ -12,21 +12,15 @@ const ForgotPassword = lazy(() => import('./pages/auth/ForgotPassword'))
 const Dashboard = lazy(() => import('./pages/dashboard/Dashboard'))
 const LiveMeeting = lazy(() => import('./pages/meeting/LiveMeeting'))
 const MeetingListPage = lazy(() => import('./pages/meeting/MeetingList'))
+const MeetingDetail = lazy(() => import('./pages/meeting/MeetingDetail'))
 const MyTasks = lazy(() => import('./pages/task/MyTasks'))
+const TaskDetail = lazy(() => import('./pages/task/TaskDetail'))
 const WorkspaceList = lazy(() => import('./pages/workspace/WorkspaceList'))
+const WorkspaceDetail = lazy(() => import('./pages/workspace/WorkspaceDetail'))
 const ProfileSettings = lazy(() => import('./pages/settings/Profile'))
 const SettingsLayout = lazy(() => import('./pages/settings/SettingsLayout'))
 const NotificationsSettings = lazy(() => import('./pages/settings/Notifications'))
 const IntegrationsSettings = lazy(() => import('./pages/settings/Integrations'))
-
-const PlaceholderPage: FC<{ title: string }> = ({ title }) => (
-  <div className="rounded-xl border border-slate-200 bg-white p-6 text-slate-700">{title}</div>
-)
-
-const WorkspaceDetail: FC = () => <PlaceholderPage title="Workspace Detail" />
-const MeetingDetail: FC = () => <PlaceholderPage title="Meeting Detail" />
-const AllTasks: FC = () => <PlaceholderPage title="All Tasks" />
-const TaskDetail: FC = () => <PlaceholderPage title="Task Detail" />
 
 /** Shared loading fallback for Suspense boundaries */
 const PageFallback: FC = () => (
@@ -116,17 +110,17 @@ function App() {
 
           {/* Workspaces */}
           <Route path="workspaces" element={<SuspenseWrapper><WorkspaceList /></SuspenseWrapper>} />
-          <Route path="workspaces/:id" element={<WorkspaceDetail />} />
+          <Route path="workspaces/:id" element={<SuspenseWrapper><WorkspaceDetail /></SuspenseWrapper>} />
 
           {/* Meetings */}
           <Route path="meetings" element={<SuspenseWrapper><MeetingListPage /></SuspenseWrapper>} />
-          <Route path="meetings/:id" element={<MeetingDetail />} />
+          <Route path="meetings/:id" element={<SuspenseWrapper><MeetingDetail /></SuspenseWrapper>} />
           <Route path="meetings/:id/live" element={<SuspenseWrapper><LiveMeeting /></SuspenseWrapper>} />
 
           {/* Tasks */}
           <Route path="tasks/my" element={<SuspenseWrapper><MyTasks /></SuspenseWrapper>} />
-          <Route path="tasks/all" element={<AllTasks />} />
-          <Route path="tasks/:id" element={<TaskDetail />} />
+          <Route path="tasks/all" element={<Navigate to="/tasks/my" replace />} />
+          <Route path="tasks/:id" element={<SuspenseWrapper><TaskDetail /></SuspenseWrapper>} />
 
           {/* Settings - nested under SettingsLayout */}
           <Route

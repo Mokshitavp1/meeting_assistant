@@ -1,25 +1,46 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import MeetingRecorder from "../../components/meeting/MeetingRecorder";
 import CreateMeetingModal from "../../components/meeting/CreateMeetingModal";
 import CreateTaskModal from "../../components/task/CreateTaskModal";
 import TaskCard from "../../components/task/TaskCard";
 import { useAuthStore } from "../../store/authStore";
-import { CalendarDays, CheckSquare, AlertTriangle, Plus } from "lucide-react";
+import { CalendarDays, CheckSquare, AlertTriangle, Plus, Loader2 } from "lucide-react";
+import apiClient from "../../api/axios.config";
+import toast from "react-hot-toast";
 
 type DashboardTask = {
   id: string;
   title: string;
-  assignee: string;
-  deadline: Date;
-  priority: "HIGH" | "MEDIUM" | "LOW";
-  status: "PENDING" | "IN_PROGRESS" | "COMPLETED" | "OVERDUE";
+  description?: string;
+  assignedTo?: {
+    id: string;
+    name: string;
+    email: string;
+  };
+  dueDate?: string;
+  priority: "low" | "medium" | "high";
+  status: "pending" | "in_progress" | "completed" | "cancelled";
+  createdAt: string;
+  updatedAt: string;
 };
 
 type DashboardMeeting = {
   id: string;
   title: string;
-  startsAt: Date;
-  workspace: string;
+  description?: string;
+  scheduledStartTime: string;
+  scheduledEndTime?: string;
+  status: "scheduled" | "in_progress" | "completed" | "cancelled";
+  workspace?: {
+    id: string;
+    name: string;
+  };
+  createdBy: {
+    id: string;
+    name: string;
+    email: string;
+  };
 };
 
 const startOfDay = (date: Date): Date => {
@@ -35,6 +56,7 @@ const addDays = (date: Date, days: number): Date => {
 };
 
 const Dashboard = () => {
+  const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const isAdmin = user?.role === "ADMIN";
   const today = startOfDay(new Date());
@@ -42,74 +64,67 @@ const Dashboard = () => {
 
   const [showScheduleMeetingModal, setShowScheduleMeetingModal] = useState(false);
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
+  const [tasks, setTasks] = useState<DashboardTask[]>([]);
+  const [meetings, setMeetings] = useState<DashboardMeeting[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const allWorkspaceTasks: DashboardTask[] = [
-    {
-      id: "task-1",
-      title: "Fix login authentication bug on staging",
-      assignee: "John Doe",
-      deadline: addDays(today, 1),
-      priority: "HIGH",
-      status: "IN_PROGRESS",
-    },
-    {
-      id: "task-2",
-      title: "Update privacy policy for GDPR compliance",
-      assignee: "Sarah Smith",
-      deadline: addDays(today, 5),
-      priority: "MEDIUM",
-      status: "PENDING",
-    },
-    {
-      id: "task-3",
-      title: "Prepare Q3 marketing slides",
-      assignee: "You",
-      deadline: addDays(today, 7),
-      priority: "LOW",
-      status: "PENDING",
-    },
-    {
-      id: "task-4",
-      title: "Share sprint demo notes",
-      assignee: "You",
-      deadline: addDays(today, -1),
-      priority: "MEDIUM",
-      status: "OVERDUE",
-    },
-    {
-      id: "task-5",
-      title: "Schedule team sync",
-      assignee: "Mike",
-      deadline: addDays(today, 2),
-      priority: "MEDIUM",
-      status: "COMPLETED",
-    },
-  ];
+  // Fetch data from API
+  const fetchData = async () => {
+    try {
+      setLoading(true);
 
-  const upcomingMeetings: DashboardMeeting[] = [
-    {
-      id: "meeting-1",
-      title: "Weekly Engineering Sync",
-      startsAt: new Date(new Date().setHours(10, 0, 0, 0)),
-      workspace: "Engineering",
-    },
-    {
-      id: "meeting-2",
-      title: "Product Roadmap Review",
-      startsAt: addDays(new Date(new Date().setHours(14, 0, 0, 0)), 2),
-      workspace: "Product",
-    },
-    {
-      id: "meeting-3",
-      title: "Customer Feedback Roundup",
-      startsAt: addDays(new Date(new Date().setHours(11, 30, 0, 0)), 4),
-      workspace: "Growth",
-    },
-  ];
+      // Fetch tasks
+      const tasksResponse = await apiClient.get('/tasks');
+      setTasks(tasksResponse.data?.data?.tasks || []);
 
-  const visibleTasks = isAdmin
-    ? allWorkspaceTasks
-    : allWorkspaceTasks.filter((task) => task.assignee.toLowerCase() === "you");
+      // Fetch meetings
+      const meetingsResponse = await apiClient.get('/meetings');
+      setMeetings(meetingsResponse.data?.data?.meetings || []);
+    } catch (error) {
+      console.error('Failed to fetch dashboard data:', error);
+      setTasks([]);
+      setMeetings([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user) {
+      fetchData();
+    }
+  }, [user]);
+
+  // Transform task data for display
+  const visibleTasks = tasks.map(task => ({
+    id: task.id,
+    title: task.title,
+    assignee: task.assignedTo ? task.assignedTo.name : "Unassigned",
+    deadline: task.dueDate ? new Date(task.dueDate) : new Date(),
+    priority: task.priority.toUpperCase() as "HIGH" | "MEDIUM" | "LOW",
+    status: (() => {
+      const s = task.status as string;
+      if (s === "completed") return "COMPLETED" as const;
+      if (s === "in_progress") return "IN_PROGRESS" as const;
+      if (task.dueDate && new Date(task.dueDate) < new Date() && s !== "completed") {
+        return "OVERDUE" as const;
+      }
+      return "PENDING" as const;
+    })(),
+  }));
+
+  // Transform meeting data for display
+  const upcomingMeetings = meetings
+    .filter(meeting => {
+      const meetingDate = new Date(meeting.scheduledStartTime);
+      return meetingDate >= today && meeting.status === 'scheduled';
+    })
+    .map(meeting => ({
+      id: meeting.id,
+      title: meeting.title,
+      startsAt: new Date(meeting.scheduledStartTime),
+      workspace: meeting.workspace?.name || "Personal",
+    }));
 
   const recentTasks = visibleTasks.filter((task) => {
     const taskDate = startOfDay(task.deadline);
@@ -140,6 +155,53 @@ const Dashboard = () => {
   const handleCreateTask = () => {
     setShowCreateTaskModal(true);
   };
+
+  // Handle modal success - refresh data
+  const handleModalSuccess = () => {
+    fetchData();
+  };
+
+  // Handle navigation
+  const handleViewAllTasks = () => {
+    navigate('/tasks/my');
+  };
+
+  const handleOpenAgenda = (meetingId: string) => {
+    navigate(`/meetings/${meetingId}`);
+  };
+
+  // Handle task actions
+  const handleMarkComplete = async (taskId: string) => {
+    try {
+      await apiClient.patch(`/tasks/${taskId}/status`, { status: 'completed' });
+      toast.success('Task marked as complete');
+      fetchData();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to update task');
+    }
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    if (!window.confirm('Delete this task?')) return;
+    try {
+      await apiClient.delete(`/tasks/${taskId}`);
+      toast.success('Task deleted');
+      fetchData();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Failed to delete task');
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="space-y-8 animate-in fade-in duration-500">
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+          <span className="ml-2 text-slate-600">Loading dashboard...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -245,7 +307,12 @@ const Dashboard = () => {
                       {meeting.workspace}
                     </p>
                   </div>
-                  <button className="text-blue-600 text-sm font-medium hover:underline">Open Agenda</button>
+                  <button
+                    onClick={() => handleOpenAgenda(meeting.id)}
+                    className="text-blue-600 text-sm font-medium hover:underline"
+                  >
+                    Open Agenda
+                  </button>
                 </div>
               ))}
             </div>
@@ -257,7 +324,12 @@ const Dashboard = () => {
             <h2 className="text-lg font-bold text-slate-800">
               ⚡ {isAdmin ? "Workspace Tasks" : "My Tasks"}
             </h2>
-            <button className="text-xs font-bold text-blue-600 uppercase hover:underline">View All</button>
+            <button
+              onClick={handleViewAllTasks}
+              className="text-xs font-bold text-blue-600 uppercase hover:underline"
+            >
+              View All
+            </button>
           </div>
 
           <p className="text-xs text-slate-500">Showing tasks due today through the next 7 days.</p>
@@ -277,10 +349,10 @@ const Dashboard = () => {
                   deadline={task.deadline}
                   priority={task.priority}
                   status={task.status}
-                  onViewDetails={(taskId) => console.log("View details", taskId)}
-                  onMarkComplete={(taskId) => console.log("Mark complete", taskId)}
-                  onEdit={(taskId) => console.log("Edit task", taskId)}
-                  onDelete={(taskId) => console.log("Delete task", taskId)}
+                  onViewDetails={(taskId) => navigate(`/tasks/${taskId}`)}
+                  onMarkComplete={(taskId) => handleMarkComplete(taskId)}
+                  onEdit={(taskId) => navigate(`/tasks/${taskId}`)}
+                  onDelete={(taskId) => handleDeleteTask(taskId)}
                 />
               ))
             )}
@@ -292,13 +364,19 @@ const Dashboard = () => {
       {showScheduleMeetingModal && (
         <CreateMeetingModal
           onClose={() => setShowScheduleMeetingModal(false)}
-          onSuccess={() => setShowScheduleMeetingModal(false)}
+          onSuccess={() => {
+            setShowScheduleMeetingModal(false);
+            handleModalSuccess();
+          }}
         />
       )}
       {showCreateTaskModal && (
         <CreateTaskModal
           onClose={() => setShowCreateTaskModal(false)}
-          onSuccess={() => setShowCreateTaskModal(false)}
+          onSuccess={() => {
+            setShowCreateTaskModal(false);
+            handleModalSuccess();
+          }}
         />
       )}
     </div>

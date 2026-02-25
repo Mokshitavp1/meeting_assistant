@@ -162,6 +162,62 @@ router.get('/me', authenticate, async (req: Request, res: Response, next: NextFu
 });
 
 /**
+ * @route   PUT /api/v1/auth/profile
+ * @desc    Update current user's profile
+ * @access  Private
+ */
+router.put('/profile', authenticate, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        if (!req.user) {
+            res.status(401).json({ success: false, message: 'Authentication required' });
+            return;
+        }
+
+        const { z } = await import('zod');
+        const { prisma } = await import('../config/database');
+
+        const schema = z.object({
+            fullName: z.string().min(2, 'Name must be at least 2 characters').max(100).optional(),
+        });
+
+        const { fullName } = schema.parse(req.body);
+
+        const updated = await prisma.user.update({
+            where: { id: req.user.id },
+            data: {
+                ...(fullName !== undefined && { name: fullName }),
+            },
+            select: {
+                id: true,
+                email: true,
+                name: true,
+                role: true,
+                isEmailVerified: true,
+                createdAt: true,
+            },
+        });
+
+        res.json({
+            success: true,
+            message: 'Profile updated successfully',
+            data: {
+                user: {
+                    id: updated.id,
+                    email: updated.email,
+                    fullName: updated.name,
+                    name: updated.name,
+                    role: updated.role?.toUpperCase() ?? 'MEMBER',
+                    isEmailVerified: updated.isEmailVerified,
+                    createdAt: updated.createdAt,
+                },
+            },
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
  * @route   PUT /api/v1/auth/change-password
  * @desc    Change password for authenticated user
  * @access  Private

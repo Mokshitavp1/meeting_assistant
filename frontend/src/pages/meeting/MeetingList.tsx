@@ -1,76 +1,60 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { Calendar, Clock, Users, Plus, Video, MapPin } from 'lucide-react'
+import { Calendar, Clock, Users, Plus, Video } from 'lucide-react'
+import apiClient from '../../api/axios.config'
+import CreateMeetingModal from '../../components/meeting/CreateMeetingModal'
 
 interface Meeting {
     id: string
     title: string
     description?: string
-    startsAt: string
-    endsAt?: string
-    workspace: string
-    participantCount: number
-    status: 'SCHEDULED' | 'LIVE' | 'COMPLETED'
-    location?: string
+    scheduledStartTime: string
+    scheduledEndTime?: string
+    status: string
+    workspace?: { id: string; name: string } | null
+    createdBy: { id: string; name: string; email: string }
+    participants: { id: string; user: { id: string; name: string } }[]
+    _count?: { participants: number; tasks: number }
 }
 
 const fetchMeetings = async (): Promise<Meeting[]> => {
-    // Mock data for now
-    return [
-        {
-            id: '1',
-            title: 'Weekly Engineering Standup',
-            description: 'Weekly team sync and sprint planning',
-            startsAt: '2024-02-26T10:00:00Z',
-            endsAt: '2024-02-26T11:00:00Z',
-            workspace: 'Engineering Team',
-            participantCount: 8,
-            status: 'SCHEDULED',
-            location: 'Conference Room A'
-        },
-        {
-            id: '2',
-            title: 'Product Review Session',
-            description: 'Review new feature designs and prototypes',
-            startsAt: '2024-02-26T14:00:00Z',
-            endsAt: '2024-02-26T15:30:00Z',
-            workspace: 'Design Sprint',
-            participantCount: 5,
-            status: 'SCHEDULED'
-        },
-        {
-            id: '3',
-            title: 'Client Presentation',
-            startsAt: '2024-02-25T09:00:00Z',
-            endsAt: '2024-02-25T10:00:00Z',
-            workspace: 'Sales Team',
-            participantCount: 12,
-            status: 'COMPLETED'
-        }
-    ]
+    const { data } = await apiClient.get('/meetings')
+    return data?.data?.meetings || []
 }
 
 const MeetingList = () => {
     const navigate = useNavigate()
-    const [filter, setFilter] = useState<'all' | 'scheduled' | 'live' | 'completed'>('all')
+    const [filter, setFilter] = useState<'all' | 'scheduled' | 'in_progress' | 'completed'>('all')
+    const [showCreateModal, setShowCreateModal] = useState(false)
 
-    const { data: meetings = [], isLoading } = useQuery({
+    const { data: meetings = [], isLoading, refetch } = useQuery({
         queryKey: ['meetings'],
         queryFn: fetchMeetings
     })
 
     const filteredMeetings = meetings.filter(meeting => {
         if (filter === 'all') return true
-        return meeting.status.toLowerCase() === filter
+        return meeting.status === filter
     })
 
     const getStatusColor = (status: string) => {
         switch (status) {
-            case 'LIVE': return 'bg-red-50 border-red-200 text-red-700'
-            case 'SCHEDULED': return 'bg-blue-50 border-blue-200 text-blue-700'
-            case 'COMPLETED': return 'bg-green-50 border-green-200 text-green-700'
+            case 'in_progress': return 'bg-red-50 border-red-200 text-red-700'
+            case 'scheduled': return 'bg-blue-50 border-blue-200 text-blue-700'
+            case 'completed': return 'bg-green-50 border-green-200 text-green-700'
+            case 'cancelled': return 'bg-gray-50 border-gray-200 text-gray-500'
             default: return 'bg-gray-50 border-gray-200 text-gray-700'
+        }
+    }
+
+    const getStatusLabel = (status: string) => {
+        switch (status) {
+            case 'in_progress': return 'LIVE'
+            case 'scheduled': return 'SCHEDULED'
+            case 'completed': return 'COMPLETED'
+            case 'cancelled': return 'CANCELLED'
+            default: return status.toUpperCase()
         }
     }
 
@@ -102,7 +86,10 @@ const MeetingList = () => {
                     <h1 className="text-2xl font-bold text-gray-900">Meetings</h1>
                     <p className="text-gray-500 text-sm mt-1">Manage your scheduled and past meetings</p>
                 </div>
-                <button className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors">
+                <button
+                    onClick={() => setShowCreateModal(true)}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
+                >
                     <Plus size={16} /> Schedule Meeting
                 </button>
             </div>
@@ -111,16 +98,21 @@ const MeetingList = () => {
             <div className="flex items-center gap-2">
                 <Calendar size={16} className="text-gray-400" />
                 <div className="flex gap-1 rounded-lg bg-gray-100 p-1">
-                    {(['all', 'scheduled', 'live', 'completed'] as const).map((status) => (
+                    {([
+                        { key: 'all', label: 'All' },
+                        { key: 'scheduled', label: 'Scheduled' },
+                        { key: 'in_progress', label: 'Live' },
+                        { key: 'completed', label: 'Completed' },
+                    ] as const).map(({ key, label }) => (
                         <button
-                            key={status}
-                            onClick={() => setFilter(status)}
-                            className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors capitalize ${filter === status
+                            key={key}
+                            onClick={() => setFilter(key)}
+                            className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${filter === key
                                 ? 'bg-white text-gray-900 shadow-sm'
                                 : 'text-gray-600 hover:text-gray-900'
                                 }`}
                         >
-                            {status}
+                            {label}
                         </button>
                     ))}
                 </div>
@@ -138,8 +130,9 @@ const MeetingList = () => {
             ) : (
                 <div className="space-y-3">
                     {filteredMeetings.map((meeting) => {
-                        const { date, time } = formatDateTime(meeting.startsAt)
-                        const endTime = meeting.endsAt ? formatDateTime(meeting.endsAt).time : null
+                        const { date, time } = formatDateTime(meeting.scheduledStartTime)
+                        const endTime = meeting.scheduledEndTime ? formatDateTime(meeting.scheduledEndTime).time : null
+                        const participantCount = meeting._count?.participants ?? meeting.participants?.length ?? 0
 
                         return (
                             <div
@@ -151,7 +144,7 @@ const MeetingList = () => {
                                         <div className="flex items-center gap-2 mb-2">
                                             <h3 className="font-semibold text-gray-900">{meeting.title}</h3>
                                             <span className={`px-2 py-0.5 text-xs font-medium rounded-full border ${getStatusColor(meeting.status)}`}>
-                                                {meeting.status}
+                                                {getStatusLabel(meeting.status)}
                                             </span>
                                         </div>
 
@@ -170,23 +163,19 @@ const MeetingList = () => {
                                             </span>
                                             <span className="flex items-center gap-1">
                                                 <Users size={14} />
-                                                {meeting.participantCount} participants
+                                                {participantCount} participants
                                             </span>
-                                            {meeting.location && (
-                                                <span className="flex items-center gap-1">
-                                                    <MapPin size={14} />
-                                                    {meeting.location}
-                                                </span>
-                                            )}
                                         </div>
 
-                                        <div className="text-sm text-gray-600 mt-1">
-                                            Workspace: {meeting.workspace}
-                                        </div>
+                                        {meeting.workspace && (
+                                            <div className="text-sm text-gray-600 mt-1">
+                                                Workspace: {meeting.workspace.name}
+                                            </div>
+                                        )}
                                     </div>
 
                                     <div className="flex items-center gap-2 ml-4">
-                                        {meeting.status === 'LIVE' && (
+                                        {meeting.status === 'in_progress' && (
                                             <button
                                                 onClick={() => handleJoinMeeting(meeting.id)}
                                                 className="px-3 py-1 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors"
@@ -194,7 +183,7 @@ const MeetingList = () => {
                                                 Join Live
                                             </button>
                                         )}
-                                        {meeting.status === 'SCHEDULED' && (
+                                        {meeting.status === 'scheduled' && (
                                             <button
                                                 onClick={() => navigate(`/meetings/${meeting.id}`)}
                                                 className="px-3 py-1 text-sm font-medium text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors"
@@ -202,12 +191,12 @@ const MeetingList = () => {
                                                 View Details
                                             </button>
                                         )}
-                                        {meeting.status === 'COMPLETED' && (
+                                        {meeting.status === 'completed' && (
                                             <button
                                                 onClick={() => navigate(`/meetings/${meeting.id}`)}
                                                 className="px-3 py-1 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
                                             >
-                                                View Recording
+                                                View Summary
                                             </button>
                                         )}
                                     </div>
@@ -216,6 +205,17 @@ const MeetingList = () => {
                         )
                     })}
                 </div>
+            )}
+
+            {/* Create Meeting Modal */}
+            {showCreateModal && (
+                <CreateMeetingModal
+                    onClose={() => setShowCreateModal(false)}
+                    onSuccess={() => {
+                        setShowCreateModal(false)
+                        refetch()
+                    }}
+                />
             )}
         </div>
     )

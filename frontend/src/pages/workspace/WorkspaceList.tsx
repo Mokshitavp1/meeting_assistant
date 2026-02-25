@@ -13,7 +13,7 @@ import {
     ArrowRight,
     Loader2
 } from 'lucide-react'
-// import { apiClient } from '../../api/axios.config'
+import apiClient from '../../api/axios.config'
 
 interface Workspace {
     id: string
@@ -27,51 +27,31 @@ interface Workspace {
 
 // ── API helpers ──
 const fetchWorkspaces = async (): Promise<Workspace[]> => {
-    // Mock data for now
-    return [
-        {
-            id: '1',
-            name: 'Engineering Team',
-            description: 'Weekly engineering syncs and planning',
-            inviteCode: 'ENG123',
-            role: 'owner',
-            memberCount: 8,
-            createdAt: '2024-01-01'
-        },
-        {
-            id: '2',
-            name: 'Design Sprint',
-            description: null,
-            inviteCode: 'DES456',
-            role: 'member',
-            memberCount: 5,
-            createdAt: '2024-01-15'
-        }
-    ]
+    const { data } = await apiClient.get('/workspaces')
+    const workspaces = data?.data?.workspaces || []
+    return workspaces.map((ws: any) => ({
+        id: ws.id,
+        name: ws.name,
+        description: ws.description,
+        inviteCode: ws.inviteCode,
+        role: ws.role || ws.members?.[0]?.role || 'member',
+        memberCount: ws._count?.members ?? ws.members?.length ?? 0,
+        createdAt: ws.createdAt,
+    }))
 }
 
-const createWorkspace = async (data: { name: string; description?: string }) => {
-    // Mock API call
-    return {
-        id: Date.now().toString(),
-        ...data,
-        inviteCode: Math.random().toString(36).substr(2, 6).toUpperCase(),
-        role: 'owner',
-        memberCount: 1,
-        createdAt: new Date().toISOString()
-    }
+const createWorkspaceApi = async (payload: { name: string; description?: string }) => {
+    const { data } = await apiClient.post('/workspaces', payload)
+    return data?.data?.workspace
 }
 
-const joinWorkspace = async (inviteCode: string) => {
-    // Mock API call
-    return {
-        id: Date.now().toString(),
-        name: 'Joined Workspace',
-        inviteCode,
-        role: 'member',
-        memberCount: 3,
-        createdAt: new Date().toISOString()
-    }
+const joinWorkspaceApi = async (inviteCode: string) => {
+    const { data } = await apiClient.post('/workspaces/join', { inviteCode })
+    return data?.data?.workspace
+}
+
+const deleteWorkspaceApi = async (id: string) => {
+    await apiClient.delete(`/workspaces/${id}`)
 }
 
 // ── Component ──
@@ -91,7 +71,7 @@ const WorkspaceList = () => {
     })
 
     const createMutation = useMutation({
-        mutationFn: createWorkspace,
+        mutationFn: createWorkspaceApi,
         onSuccess: () => {
             toast.success('Workspace created!')
             queryClient.invalidateQueries({ queryKey: ['workspaces'] })
@@ -105,7 +85,7 @@ const WorkspaceList = () => {
     })
 
     const joinMutation = useMutation({
-        mutationFn: joinWorkspace,
+        mutationFn: joinWorkspaceApi,
         onSuccess: () => {
             toast.success('Joined workspace!')
             queryClient.invalidateQueries({ queryKey: ['workspaces'] })
@@ -118,7 +98,7 @@ const WorkspaceList = () => {
     })
 
     const deleteMutation = useMutation({
-        mutationFn: () => Promise.resolve(), // Mock delete
+        mutationFn: deleteWorkspaceApi,
         onSuccess: () => {
             toast.success('Workspace deleted')
             queryClient.invalidateQueries({ queryKey: ['workspaces'] })
@@ -138,10 +118,10 @@ const WorkspaceList = () => {
         toast.success('Invite link copied!')
     }
 
-    const handleDeleteWorkspace = (e: React.MouseEvent, _id: string, name: string) => {
+    const handleDeleteWorkspace = (e: React.MouseEvent, id: string, name: string) => {
         e.stopPropagation()
         if (!window.confirm(`Delete "${name}"? This will permanently remove all meetings and tasks.`)) return
-        deleteMutation.mutate()
+        deleteMutation.mutate(id)
     }
 
     if (isLoading) {
