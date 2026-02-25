@@ -1,4 +1,7 @@
+import { useState } from "react";
 import MeetingRecorder from "../../components/meeting/MeetingRecorder";
+import CreateMeetingModal from "../../components/meeting/CreateMeetingModal";
+import CreateTaskModal from "../../components/task/CreateTaskModal";
 import TaskCard from "../../components/task/TaskCard";
 import { useAuthStore } from "../../store/authStore";
 import { CalendarDays, CheckSquare, AlertTriangle, Plus } from "lucide-react";
@@ -36,6 +39,9 @@ const Dashboard = () => {
   const isAdmin = user?.role === "ADMIN";
   const today = startOfDay(new Date());
   const nextWeek = addDays(today, 7);
+
+  const [showScheduleMeetingModal, setShowScheduleMeetingModal] = useState(false);
+  const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
 
   const allWorkspaceTasks: DashboardTask[] = [
     {
@@ -128,11 +134,11 @@ const Dashboard = () => {
   });
 
   const handleScheduleMeeting = () => {
-    console.log("Schedule meeting action triggered");
+    setShowScheduleMeetingModal(true);
   };
 
   const handleCreateTask = () => {
-    console.log("Create task action triggered");
+    setShowCreateTaskModal(true);
   };
 
   return (
@@ -281,6 +287,20 @@ const Dashboard = () => {
           </div>
         </div>
       </div>
+
+      {/* Modals */}
+      {showScheduleMeetingModal && (
+        <CreateMeetingModal
+          onClose={() => setShowScheduleMeetingModal(false)}
+          onSuccess={() => setShowScheduleMeetingModal(false)}
+        />
+      )}
+      {showCreateTaskModal && (
+        <CreateTaskModal
+          onClose={() => setShowCreateTaskModal(false)}
+          onSuccess={() => setShowCreateTaskModal(false)}
+        />
+      )}
     </div>
   );
 };

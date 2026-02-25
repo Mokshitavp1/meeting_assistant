@@ -117,26 +117,43 @@ const MeetingRecorder: FC = () => {
   };
 
   const uploadRecording = async (audioBlob: Blob) => {
-    const file = new File([audioBlob], `meeting-${Date.now()}.webm`, { type: audioBlob.type });
-    const formData = new FormData();
-    formData.append("file", file);
-
     try {
       setIsUploading(true);
       setUploadProgress(0);
 
-      await apiClient.post("/meetings/upload", formData, {
+      // Step 1: Create an ad-hoc meeting to associate the recording with
+      const now = new Date();
+      const meetingRes = await apiClient.post("/meetings", {
+        title: `Quick Recording – ${now.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`,
+        description: "Recording created from Live Recorder",
+        scheduledStartTime: now.toISOString(),
+      });
+      const meetingData = meetingRes.data;
+      const meetingId: string =
+        meetingData?.data?.meeting?.id ?? meetingData?.meeting?.id ?? meetingData?.id;
+
+      if (!meetingId) {
+        throw new Error("Failed to create meeting for recording");
+      }
+
+      setUploadProgress(10);
+
+      // Step 2: Upload the recording to the correct endpoint
+      const file = new File([audioBlob], `recording-${Date.now()}.webm`, { type: audioBlob.type });
+      const formData = new FormData();
+      formData.append("recording", file);
+
+      await apiClient.post(`/meetings/${meetingId}/recording`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
         onUploadProgress: (event) => {
-          if (!event.total) {
-            return;
-          }
-          const progress = Math.round((event.loaded * 100) / event.total);
+          if (!event.total) return;
+          // Map upload progress from 10% to 100%
+          const progress = 10 + Math.round((event.loaded * 90) / event.total);
           setUploadProgress(progress);
         },
       });
 
-      toast.success("Meeting uploaded! AI processing started.");
+      toast.success("Recording uploaded! AI processing started.");
     } catch (error) {
       console.error(error);
       setErrorMessage("Upload failed. Please try recording again.");
@@ -267,10 +284,10 @@ const MeetingRecorder: FC = () => {
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-bold text-slate-800">🔴 Live Recorder</h2>
         <span className={`px-3 py-1 rounded-full text-xs font-bold tracking-wide uppercase ${status === "recording"
-            ? "bg-red-100 text-red-600 animate-pulse"
-            : status === "paused"
-              ? "bg-amber-100 text-amber-600"
-              : "bg-slate-100 text-slate-500"
+          ? "bg-red-100 text-red-600 animate-pulse"
+          : status === "paused"
+            ? "bg-amber-100 text-amber-600"
+            : "bg-slate-100 text-slate-500"
           }`}>
           {statusLabel}
         </span>

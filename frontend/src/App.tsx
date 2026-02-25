@@ -11,21 +11,22 @@ const Register = lazy(() => import('./pages/auth/Register'))
 const ForgotPassword = lazy(() => import('./pages/auth/ForgotPassword'))
 const Dashboard = lazy(() => import('./pages/dashboard/Dashboard'))
 const LiveMeeting = lazy(() => import('./pages/meeting/LiveMeeting'))
+const MeetingListPage = lazy(() => import('./pages/meeting/MeetingList'))
 const MyTasks = lazy(() => import('./pages/task/MyTasks'))
 const WorkspaceList = lazy(() => import('./pages/workspace/WorkspaceList'))
+const ProfileSettings = lazy(() => import('./pages/settings/Profile'))
+const SettingsLayout = lazy(() => import('./pages/settings/SettingsLayout'))
+const NotificationsSettings = lazy(() => import('./pages/settings/Notifications'))
+const IntegrationsSettings = lazy(() => import('./pages/settings/Integrations'))
 
 const PlaceholderPage: FC<{ title: string }> = ({ title }) => (
   <div className="rounded-xl border border-slate-200 bg-white p-6 text-slate-700">{title}</div>
 )
 
 const WorkspaceDetail: FC = () => <PlaceholderPage title="Workspace Detail" />
-const MeetingList: FC = () => <PlaceholderPage title="Meeting List" />
 const MeetingDetail: FC = () => <PlaceholderPage title="Meeting Detail" />
 const AllTasks: FC = () => <PlaceholderPage title="All Tasks" />
 const TaskDetail: FC = () => <PlaceholderPage title="Task Detail" />
-const Profile: FC = () => <PlaceholderPage title="Profile Settings" />
-const Notifications: FC = () => <PlaceholderPage title="Notification Settings" />
-const Integrations: FC = () => <PlaceholderPage title="Integrations Settings" />
 
 /** Shared loading fallback for Suspense boundaries */
 const PageFallback: FC = () => (
@@ -118,7 +119,7 @@ function App() {
           <Route path="workspaces/:id" element={<WorkspaceDetail />} />
 
           {/* Meetings */}
-          <Route path="meetings" element={<MeetingList />} />
+          <Route path="meetings" element={<SuspenseWrapper><MeetingListPage /></SuspenseWrapper>} />
           <Route path="meetings/:id" element={<MeetingDetail />} />
           <Route path="meetings/:id/live" element={<SuspenseWrapper><LiveMeeting /></SuspenseWrapper>} />
 
@@ -127,10 +128,16 @@ function App() {
           <Route path="tasks/all" element={<AllTasks />} />
           <Route path="tasks/:id" element={<TaskDetail />} />
 
-          {/* Settings */}
-          <Route path="settings/profile" element={<Profile />} />
-          <Route path="settings/notifications" element={<Notifications />} />
-          <Route path="settings/integrations" element={<Integrations />} />
+          {/* Settings - nested under SettingsLayout */}
+          <Route
+            path="settings"
+            element={<SuspenseWrapper><SettingsLayout /></SuspenseWrapper>}
+          >
+            <Route index element={<Navigate to="profile" replace />} />
+            <Route path="profile" element={<SuspenseWrapper><ProfileSettings /></SuspenseWrapper>} />
+            <Route path="notifications" element={<SuspenseWrapper><NotificationsSettings /></SuspenseWrapper>} />
+            <Route path="integrations" element={<SuspenseWrapper><IntegrationsSettings /></SuspenseWrapper>} />
+          </Route>
         </Route>
 
         {/* 404 */}

@@ -1,11 +1,11 @@
 import { Link, useLocation } from "react-router-dom";
-import { 
-  LayoutDashboard, 
-  Users, 
-  CalendarDays, 
-  CheckSquare, 
+import {
+  LayoutDashboard,
+  Users,
+  CalendarDays,
+  CheckSquare,
   Settings,
-  LogOut 
+  LogOut
 } from "lucide-react";
 import { useAuthStore } from "../../store/authStore";
 import clsx from "clsx"; // Make sure to npm install clsx
@@ -15,11 +15,11 @@ const Sidebar = () => {
   const logout = useAuthStore((state) => state.logout);
 
   const navItems = [
-    { name: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
-    { name: "Workspaces", path: "/workspaces", icon: Users },
-    { name: "Meetings", path: "/meetings", icon: CalendarDays },
-    { name: "My Tasks", path: "/tasks", icon: CheckSquare },
-    { name: "Settings", path: "/settings", icon: Settings },
+    { name: "Dashboard", path: "/dashboard", icon: LayoutDashboard, match: "/dashboard" },
+    { name: "Workspaces", path: "/workspaces", icon: Users, match: "/workspaces" },
+    { name: "Meetings", path: "/meetings", icon: CalendarDays, match: "/meetings" },
+    { name: "My Tasks", path: "/tasks/my", icon: CheckSquare, match: "/tasks" },
+    { name: "Settings", path: "/settings/profile", icon: Settings, match: "/settings" },
   ];
 
   return (
@@ -34,16 +34,16 @@ const Sidebar = () => {
       <nav className="flex-1 px-4 space-y-2 mt-4">
         {navItems.map((item) => {
           const Icon = item.icon;
-          const isActive = location.pathname.startsWith(item.path);
-          
+          const isActive = location.pathname.startsWith(item.match);
+
           return (
             <Link
               key={item.path}
               to={item.path}
               className={clsx(
                 "flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200",
-                isActive 
-                  ? "bg-blue-600 text-white shadow-lg shadow-blue-900/50" 
+                isActive
+                  ? "bg-blue-600 text-white shadow-lg shadow-blue-900/50"
                   : "text-slate-400 hover:bg-slate-800 hover:text-white"
               )}
             >

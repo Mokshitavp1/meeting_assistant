@@ -12,7 +12,7 @@ import {
     processMeeting,
 } from '../controllers/meeting.controller';
 import { authenticate } from '../middleware/auth.middleware';
-import { uploadRecording as uploadRecordingMiddleware } from '../app';
+import { uploadRecording as uploadRecordingMiddleware } from '../config/upload';
 
 /**
  * Meeting Routes

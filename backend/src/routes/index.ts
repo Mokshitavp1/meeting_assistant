@@ -14,7 +14,7 @@ import meetingRoutes from './meeting.routes';
 import taskRoutes from './task.routes';
 
 // Import middleware
-import { authLimiter } from '../app';
+import { authLimiter } from '../config/rateLimiter';
 
 /**
  * Create API v1 Router

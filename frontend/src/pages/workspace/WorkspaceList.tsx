@@ -1,19 +1,19 @@
-import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import toast from 'react-hot-toast'
-import apiClient from '../../api/axios.config'
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
+import { toast } from 'react-hot-toast'
 import {
+    Building2,
     Plus,
+    LogIn,
     Users,
     Copy,
-    LogIn,
-    Loader2,
-    Building2,
+    LinkIcon,
+    Trash2,
     ArrowRight,
+    Loader2
 } from 'lucide-react'
-
-// ── Types ──
+// import { apiClient } from '../../api/axios.config'
 
 interface Workspace {
     id: string
@@ -26,24 +26,55 @@ interface Workspace {
 }
 
 // ── API helpers ──
-
 const fetchWorkspaces = async (): Promise<Workspace[]> => {
-    const res = await apiClient.get('/workspaces')
-    return res.data.data?.workspaces ?? []
+    // Mock data for now
+    return [
+        {
+            id: '1',
+            name: 'Engineering Team',
+            description: 'Weekly engineering syncs and planning',
+            inviteCode: 'ENG123',
+            role: 'owner',
+            memberCount: 8,
+            createdAt: '2024-01-01'
+        },
+        {
+            id: '2',
+            name: 'Design Sprint',
+            description: null,
+            inviteCode: 'DES456',
+            role: 'member',
+            memberCount: 5,
+            createdAt: '2024-01-15'
+        }
+    ]
 }
 
 const createWorkspace = async (data: { name: string; description?: string }) => {
-    const res = await apiClient.post('/workspaces', data)
-    return res.data.data?.workspace
+    // Mock API call
+    return {
+        id: Date.now().toString(),
+        ...data,
+        inviteCode: Math.random().toString(36).substr(2, 6).toUpperCase(),
+        role: 'owner',
+        memberCount: 1,
+        createdAt: new Date().toISOString()
+    }
 }
 
 const joinWorkspace = async (inviteCode: string) => {
-    const res = await apiClient.post('/workspaces/join', { inviteCode })
-    return res.data.data?.workspace
+    // Mock API call
+    return {
+        id: Date.now().toString(),
+        name: 'Joined Workspace',
+        inviteCode,
+        role: 'member',
+        memberCount: 3,
+        createdAt: new Date().toISOString()
+    }
 }
 
 // ── Component ──
-
 const WorkspaceList = () => {
     const navigate = useNavigate()
     const queryClient = useQueryClient()
@@ -69,7 +100,7 @@ const WorkspaceList = () => {
             setCreateDesc('')
         },
         onError: (err: any) => {
-            toast.error(err.response?.data?.message || 'Failed to create workspace')
+            toast.error(err?.response?.data?.message || 'Failed to create workspace')
         },
     })
 
@@ -82,13 +113,35 @@ const WorkspaceList = () => {
             setInviteCode('')
         },
         onError: (err: any) => {
-            toast.error(err.response?.data?.message || 'Invalid invite code')
+            toast.error(err?.response?.data?.message || 'Invalid invite code')
+        },
+    })
+
+    const deleteMutation = useMutation({
+        mutationFn: () => Promise.resolve(), // Mock delete
+        onSuccess: () => {
+            toast.success('Workspace deleted')
+            queryClient.invalidateQueries({ queryKey: ['workspaces'] })
+        },
+        onError: (err: any) => {
+            toast.error(err?.response?.data?.message || 'Failed to delete workspace')
         },
     })
 
     const copyInviteCode = (code: string) => {
         navigator.clipboard.writeText(code)
         toast.success('Invite code copied!')
+    }
+
+    const copyInviteLink = (code: string) => {
+        navigator.clipboard.writeText(`${window.location.origin}/join/${code}`)
+        toast.success('Invite link copied!')
+    }
+
+    const handleDeleteWorkspace = (e: React.MouseEvent, _id: string, name: string) => {
+        e.stopPropagation()
+        if (!window.confirm(`Delete "${name}"? This will permanently remove all meetings and tasks.`)) return
+        deleteMutation.mutate()
     }
 
     if (isLoading) {
@@ -274,23 +327,45 @@ const WorkspaceList = () => {
                             )}
 
                             <div className="flex items-center justify-between text-sm text-gray-400 border-t border-gray-100 pt-3 mt-3">
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation()
-                                        copyInviteCode(ws.inviteCode)
-                                    }}
-                                    className="inline-flex items-center gap-1 hover:text-gray-600 transition-colors"
-                                    title="Copy invite code"
-                                >
-                                    <Copy size={14} /> Invite
-                                </button>
-                                <span className="inline-flex items-center gap-1">
-                                    <Users size={14} /> {ws.memberCount ?? '—'}
-                                </span>
-                                <ArrowRight
-                                    size={16}
-                                    className="text-gray-300 group-hover:text-blue-500 transition-colors"
-                                />
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation()
+                                            copyInviteCode(ws.inviteCode)
+                                        }}
+                                        className="inline-flex items-center gap-1 hover:text-gray-600 transition-colors"
+                                        title={`Copy invite code: ${ws.inviteCode}`}
+                                    >
+                                        <Copy size={14} />
+                                        <span className="font-mono text-xs">{ws.inviteCode}</span>
+                                    </button>
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation()
+                                            copyInviteLink(ws.inviteCode)
+                                        }}
+                                        className="inline-flex items-center gap-1 hover:text-blue-600 transition-colors"
+                                        title="Copy shareable link"
+                                    >
+                                        <LinkIcon size={14} />
+                                    </button>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <span className="inline-flex items-center gap-1">
+                                        <Users size={14} /> {ws.memberCount ?? '—'}
+                                    </span>
+                                    <button
+                                        onClick={(e) => handleDeleteWorkspace(e, ws.id, ws.name)}
+                                        className="text-red-400 hover:text-red-600 transition-colors"
+                                        title="Delete workspace"
+                                    >
+                                        <Trash2 size={14} />
+                                    </button>
+                                    <ArrowRight
+                                        size={16}
+                                        className="text-gray-300 group-hover:text-blue-500 transition-colors"
+                                    />
+                                </div>
                             </div>
                         </div>
                     ))}

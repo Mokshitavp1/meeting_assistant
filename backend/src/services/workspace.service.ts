@@ -68,10 +68,13 @@ export interface WorkspaceMember {
 
 /**
  * Generate Unique Invite Code
- * Creates a cryptographically secure random invite code
+ * Creates a human-readable invite code in format ABC-XYZ-123
  */
 export function generateInviteCode(): string {
-    return crypto.randomBytes(16).toString('hex');
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    const segment = (len: number) =>
+        Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    return `${segment(3)}-${segment(3)}-${segment(3)}`;
 }
 
 /**
