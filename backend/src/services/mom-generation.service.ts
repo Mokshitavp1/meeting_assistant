@@ -74,6 +74,9 @@ const SYSTEM_PROMPT = [
     '  "attendees": ["string"]',
     '}',
     'Keep points concise and factual based only on transcript content.',
+    'IMPORTANT: Each action item MUST include the assignee\'s name in the format: "Task description (AssigneeName) — due date or timeline".',
+    'If the transcript mentions who is responsible for a task, always include that person\'s name in the action item.',
+    'Use the exact names from the provided attendee list when possible.',
 ].join('\n');
 
 export function buildMoMPrompt(
@@ -88,6 +91,10 @@ export function buildMoMPrompt(
         'Generate structured Minutes of Meeting from this transcript.',
         'Include summary, key discussion points, decisions made, action items, and attendees.',
         'If attendees are not clear in transcript, use provided attendee list and/or infer carefully.',
+        '',
+        'CRITICAL: For action items, you MUST assign each task to the person named in the transcript.',
+        'Format each action item as: "Task description (PersonName) — due date or timeline"',
+        'Use the exact names from the provided attendee list below.',
         '',
         'Provided attendees:',
         attendeeSection,

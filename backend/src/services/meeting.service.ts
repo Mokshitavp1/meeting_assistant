@@ -638,18 +638,31 @@ async function runDevFallbackProcessing(meetingId: string): Promise<void> {
     if (!meeting) return;
 
     const now = new Date().toISOString();
-    const participantNames = meeting.participants.map((p) => p.user.name || p.user.email).join(', ');
+    const participants = meeting.participants;
+    const participantNames = participants.map((p) => p.user.name || p.user.email).join(', ');
+
+    // Use actual participant names in the synthetic transcript
+    const nameAt = (index: number) =>
+        participants[index]?.user.name ||
+        participants[index]?.user.email ||
+        ['Facilitator', 'Member A', 'Member B'][index] ||
+        `Participant ${index + 1}`;
+
+    const p0 = nameAt(0);
+    const p1 = nameAt(1);
+    const p2 = nameAt(2);
+
     const syntheticTranscript = [
         `[Meeting: ${meeting.title} | ${now}]`,
         `Participants: ${participantNames || 'Unknown'}`,
         '',
-        'Alice: Let\'s discuss the project timeline and assign responsibilities.',
-        'Bob: I will handle the backend API integration by end of next week.',
-        'Alice: Great. I\'ll prepare the design mockups by Wednesday.',
-        'Charlie: I can review the designs on Thursday and provide feedback.',
-        'Alice: Perfect. Bob, please also write unit tests for the new endpoints.',
-        'Bob: Sure, I\'ll have those done by Friday.',
-        'Alice: Let\'s set up a follow-up meeting next Monday to review progress.',
+        `${p0}: Let's discuss the project timeline and assign responsibilities.`,
+        `${p1}: I will handle the backend API integration by end of next week.`,
+        `${p0}: Great. I'll prepare the design mockups by Wednesday.`,
+        `${p2}: I can review the designs on Thursday and provide feedback.`,
+        `${p0}: Perfect. ${p1}, please also write unit tests for the new endpoints.`,
+        `${p1}: Sure, I'll have those done by Friday.`,
+        `${p0}: Let's set up a follow-up meeting next Monday to review progress.`,
     ].join('\n');
 
     const minutesOfMeeting = [
@@ -663,11 +676,11 @@ async function runDevFallbackProcessing(meetingId: string): Promise<void> {
         '- Scheduled a follow-up review meeting.',
         '',
         '## Action Items',
-        '- Backend API integration (Bob) — due end of next week',
-        '- Design mockups (Alice) — due Wednesday',
-        '- Design review and feedback (Charlie) — due Thursday',
-        '- Unit tests for new endpoints (Bob) — due Friday',
-        '- Follow-up meeting — next Monday',
+        `- Backend API integration (${p1}) — due end of next week`,
+        `- Design mockups (${p0}) — due Wednesday`,
+        `- Design review and feedback (${p2}) — due Thursday`,
+        `- Unit tests for new endpoints (${p1}) — due Friday`,
+        `- Follow-up meeting (${p0}) — next Monday`,
     ].join('\n');
 
     // Update meeting with synthetic minutes
@@ -701,7 +714,6 @@ async function runDevFallbackProcessing(meetingId: string): Promise<void> {
         const UNCONFIRMED = '[UNCONFIRMED_AI_TASK]';
 
         // Map first few participants to tasks
-        const participants = meeting.participants;
         const sampleTasks = [
             {
                 title: 'Complete backend API integration',

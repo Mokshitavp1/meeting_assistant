@@ -3,6 +3,7 @@ import { prisma } from '../config/database';
 import { redisClient, setJSON, getJSON } from '../config/redis';
 import { BadRequestError, NotFoundError } from '../middleware/error.middleware';
 import { extractTasksFromTranscript, type MeetingParticipant } from '../services/ai-extraction.service';
+import { generateMinutesOfMeeting } from '../services/mom-generation.service';
 import { sendTaskAssignmentEmail } from '../services/email.service';
 
 export interface TaskExtractionJobData {
@@ -50,6 +51,7 @@ let taskExtractionQueue: Queue<TaskExtractionJobData, TaskExtractionJobResult> |
 let taskExtractionWorker: Worker<TaskExtractionJobData, TaskExtractionJobResult> | null = null;
 let taskExtractionQueueEvents: QueueEvents | null = null;
 let momGenerationQueue: Queue<MoMGenerationJobData> | null = null;
+let momGenerationWorker: Worker<MoMGenerationJobData> | null = null;
 
 function validatePayload(payload: TaskExtractionJobData): void {
     if (!payload.meetingId?.trim()) {
@@ -247,6 +249,12 @@ async function processTaskExtractionJob(
         const normalized = normalizeName(displayName);
         if (normalized) {
             participantAssigneeMap.set(normalized, participant.userId);
+            // Also index individual tokens (first name, last name) so partial matches work
+            for (const token of normalized.split(' ').filter((t) => t.length > 1)) {
+                if (!participantAssigneeMap.has(token)) {
+                    participantAssigneeMap.set(token, participant.userId);
+                }
+            }
         }
     }
 
@@ -386,6 +394,65 @@ export async function initializeTaskExtractionQueue(): Promise<void> {
             }
         });
     }
+
+    if (!momGenerationWorker) {
+        momGenerationWorker = new Worker<MoMGenerationJobData>(
+            MOM_GENERATION_QUEUE_NAME,
+            async (job) => {
+                const { meetingId, transcript } = job.data;
+                console.log(`[MoMGenerationJob] Started job=${job.id} meeting=${meetingId}`);
+
+                const meeting = await prisma.meeting.findUnique({
+                    where: { id: meetingId },
+                    select: {
+                        id: true,
+                        participants: {
+                            select: {
+                                user: { select: { id: true, name: true, email: true } },
+                            },
+                        },
+                    },
+                });
+
+                if (!meeting) {
+                    throw new NotFoundError('Meeting');
+                }
+
+                const attendees = meeting.participants.map((p) => ({
+                    id: p.user.id,
+                    name: p.user.name || p.user.email,
+                    email: p.user.email,
+                }));
+
+                const provider = (process.env.AI_PROVIDER || 'openai').toLowerCase() === 'anthropic'
+                    ? 'anthropic' as const
+                    : 'openai' as const;
+
+                const result = await generateMinutesOfMeeting({
+                    transcript,
+                    attendees,
+                    provider,
+                });
+
+                await prisma.meeting.update({
+                    where: { id: meetingId },
+                    data: { minutesOfMeeting: result.formatted },
+                });
+
+                console.log(`[MoMGenerationJob] Completed job=${job.id} meeting=${meetingId}`);
+            },
+            {
+                connection: redisClient,
+                concurrency: 2,
+            }
+        );
+
+        momGenerationWorker.on('failed', (job, error) => {
+            console.error(
+                `[MoMGenerationJob] Failed job=${job?.id} meeting=${job?.data?.meetingId || 'unknown'} error=${error?.message || 'Unknown error'}`
+            );
+        });
+    }
 }
 
 export async function queueTaskExtractionJob(
@@ -415,11 +482,13 @@ export async function queueTaskExtractionJob(
 
 export async function shutdownTaskExtractionQueue(): Promise<void> {
     await taskExtractionWorker?.close();
+    await momGenerationWorker?.close();
     await taskExtractionQueueEvents?.close();
     await taskExtractionQueue?.close();
     await momGenerationQueue?.close();
 
     taskExtractionWorker = null;
+    momGenerationWorker = null;
     taskExtractionQueueEvents = null;
     taskExtractionQueue = null;
     momGenerationQueue = null;

@@ -97,7 +97,10 @@ export function buildTaskExtractionPrompt(
     return [
         'Extract action items from this meeting transcript.',
         `Return at most ${maxTasks} tasks.`,
-        'Assignee must be one of the participant names when possible.',
+        'IMPORTANT: For every task, identify who was assigned or volunteered to do it in the transcript.',
+        'The "assigneeName" field MUST be the exact name of the person responsible, taken from the Participants list below.',
+        'Match transcript speaker names and mentions to the closest participant name.',
+        'Only set "assigneeName" to null if truly no person is mentioned for that task.',
         '',
         'Participants:',
         participantList,
