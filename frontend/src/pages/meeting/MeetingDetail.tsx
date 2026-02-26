@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
     Calendar, Clock, Users, ArrowLeft, Play, Square,
-    Trash2, Edit3, Loader2, Video
+    Trash2, Edit3, Loader2, Video, ClipboardList
 } from 'lucide-react'
 import apiClient from '../../api/axios.config'
 import toast from 'react-hot-toast'
@@ -261,6 +261,20 @@ const MeetingDetail = () => {
                                     <Square size={16} /> End Meeting
                                 </button>
                             </>
+                        )}
+                        {meeting.status === 'completed' && (
+                            <button
+                                onClick={() => navigate(`/meetings/${id}/review`)}
+                                className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+                            >
+                                <ClipboardList size={16} />
+                                Review Tasks &amp; MoM
+                                {meeting._count && meeting._count.tasks > 0 && (
+                                    <span className="ml-1 rounded-full bg-blue-500 text-white text-[10px] font-bold px-1.5">
+                                        {meeting._count.tasks}
+                                    </span>
+                                )}
+                            </button>
                         )}
                         <button
                             onClick={() => {

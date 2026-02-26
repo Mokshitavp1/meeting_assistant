@@ -12,6 +12,7 @@ import authRoutes from './auth.routes';
 import workspaceRoutes from './workspace.routes';
 import meetingRoutes from './meeting.routes';
 import taskRoutes from './task.routes';
+import notificationRoutes from './notification.routes';
 
 // Import middleware
 import { authLimiter } from '../config/rateLimiter';
@@ -47,6 +48,9 @@ const createV1Router = (): Router => {
     // Task management routes
     router.use('/tasks', taskRoutes);
 
+    // Notification routes (in-app notifications from Redis)
+    router.use('/notifications', notificationRoutes);
+
     // Transcription routes (AI transcription services)
     // router.use('/transcriptions', transcriptionRoutes);
 
@@ -58,9 +62,6 @@ const createV1Router = (): Router => {
 
     // Integration routes (Google Calendar, Slack, etc.)
     // router.use('/integrations', integrationRoutes);
-
-    // Notification routes
-    // router.use('/notifications', notificationRoutes);
 
     // Search routes (full-text search across meetings, transcripts)
     // router.use('/search', searchRoutes);

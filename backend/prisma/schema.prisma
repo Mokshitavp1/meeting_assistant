@@ -208,6 +208,10 @@ model Task {
   priority    String   @default("medium") // low, medium, high
   dueDate     DateTime?
 
+  // AI extraction confirmation
+  isConfirmed     Boolean  @default(false)
+  calendarEventId String?
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   completedAt DateTime?

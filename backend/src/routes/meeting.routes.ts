@@ -10,6 +10,8 @@ import {
     uploadRecording,
     getTranscript,
     processMeeting,
+    reviewMeeting,
+    confirmMeetingTasks,
 } from '../controllers/meeting.controller';
 import { authenticate } from '../middleware/auth.middleware';
 import { uploadRecording as uploadRecordingMiddleware } from '../config/upload';
@@ -93,5 +95,19 @@ router.get('/:id/transcript', getTranscript);
  * @access  Private
  */
 router.post('/:id/process', processMeeting);
+
+/**
+ * @route   GET /api/v1/meetings/:id/review
+ * @desc    Get AI-extracted tasks and MoM for admin review/editing
+ * @access  Private (creator, organizer, workspace admin)
+ */
+router.get('/:id/review', reviewMeeting);
+
+/**
+ * @route   POST /api/v1/meetings/:id/confirm
+ * @desc    Confirm edited tasks and MoM — triggers calendar events + emails
+ * @access  Private (creator, organizer, workspace admin)
+ */
+router.post('/:id/confirm', confirmMeetingTasks);
 
 export default router;

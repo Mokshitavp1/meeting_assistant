@@ -1,6 +1,6 @@
 import { Queue, Worker, QueueEvents, JobsOptions, Job } from 'bullmq';
 import { prisma } from '../config/database';
-import { redisClient } from '../config/redis';
+import { redisClient, setJSON, getJSON } from '../config/redis';
 import { BadRequestError, NotFoundError } from '../middleware/error.middleware';
 import { extractTasksFromTranscript, type MeetingParticipant } from '../services/ai-extraction.service';
 import { sendTaskAssignmentEmail } from '../services/email.service';
@@ -92,7 +92,7 @@ function parseDueDate(deadline: string | null): Date | null {
     return parsed;
 }
 
-async function getAdminEmails(meetingId: string): Promise<string[]> {
+async function getAdminUsers(meetingId: string): Promise<Array<{ id: string; email: string }>> {
     const meeting = await prisma.meeting.findUnique({
         where: { id: meetingId },
         select: {
@@ -114,6 +114,7 @@ async function getAdminEmails(meetingId: string): Promise<string[]> {
             select: {
                 user: {
                     select: {
+                        id: true,
                         email: true,
                     },
                 },
@@ -121,8 +122,8 @@ async function getAdminEmails(meetingId: string): Promise<string[]> {
         });
 
         return workspaceAdmins
-            .map((item) => item.user.email)
-            .filter((email): email is string => Boolean(email));
+            .map((item) => ({ id: item.user.id, email: item.user.email }))
+            .filter((u) => Boolean(u.email));
     }
 
     const globalAdmins = await prisma.user.findMany({
@@ -131,13 +132,12 @@ async function getAdminEmails(meetingId: string): Promise<string[]> {
             isActive: true,
         },
         select: {
+            id: true,
             email: true,
         },
     });
 
-    return globalAdmins
-        .map((item) => item.email)
-        .filter((email): email is string => Boolean(email));
+    return globalAdmins.filter((u) => Boolean(u.email));
 }
 
 async function notifyAdminsTasksReadyForReview(meetingId: string, taskCount: number): Promise<void> {
@@ -149,26 +149,46 @@ async function notifyAdminsTasksReadyForReview(meetingId: string, taskCount: num
     });
 
     const meetingTitle = meeting?.title || `Meeting ${meetingId}`;
-    const adminEmails = await getAdminEmails(meetingId);
+    const adminUsers = await getAdminUsers(meetingId);
 
-    if (!adminEmails.length) {
+    if (!adminUsers.length) {
         console.warn(
             `[TaskExtractionJob] No admin recipients found for meeting=${meetingId}`
         );
         return;
     }
 
+    const NOTIFICATION_KEY_PREFIX = 'notifications:user:';
+    const NOTIFICATION_TTL_SECONDS = 60 * 60 * 24 * 30;
+
     const results = await Promise.allSettled(
-        adminEmails.map((email) =>
-            sendTaskAssignmentEmail({
-                to: email,
+        adminUsers.map(async (admin) => {
+            // Email notification
+            await sendTaskAssignmentEmail({
+                to: admin.email,
                 assigneeName: 'Admin',
-                taskTitle: `${taskCount} extracted tasks ready for review`,
+                taskTitle: `${taskCount} extracted task(s) ready for review`,
                 dueDate: 'Review pending',
                 meetingTitle,
                 taskLink: '#',
-            })
-        )
+            });
+
+            // In-app notification
+            const key = `${NOTIFICATION_KEY_PREFIX}${admin.id}`;
+            const existing = (await getJSON<any[]>(key)) || [];
+            const notification = {
+                id: `notif_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                type: 'meeting-review-ready',
+                title: 'Meeting Tasks Ready for Review',
+                message: `"${meetingTitle}" has ${taskCount} AI-extracted task(s) awaiting your review and confirmation.`,
+                meetingId,
+                meetingTitle,
+                createdAt: new Date().toISOString(),
+                read: false,
+            };
+            const updated = [notification, ...existing].slice(0, 200);
+            await setJSON(key, updated, NOTIFICATION_TTL_SECONDS);
+        })
     );
 
     const failedCount = results.filter((result) => result.status === 'rejected').length;
@@ -260,6 +280,7 @@ async function processTaskExtractionJob(
                     dueDate: parseDueDate(task.deadline),
                     status: 'pending',
                     priority: mapConfidenceToPriority(task.confidence),
+                    isConfirmed: false,
                 },
             });
         })

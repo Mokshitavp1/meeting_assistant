@@ -5,6 +5,15 @@ import apiClient from "../../api/axios.config";
 
 type RecorderStatus = "idle" | "recording" | "paused" | "stopped";
 
+interface MeetingRecorderProps {
+  /** If provided, recordings are attached to this meeting instead of creating a new one */
+  meetingId?: string;
+  /** If true, recording starts automatically on mount */
+  autoStart?: boolean;
+  /** Called when recording stops and upload finishes successfully */
+  onUploadComplete?: (meetingId: string) => void;
+}
+
 const formatTime = (totalSeconds: number): string => {
   const minutes = Math.floor(totalSeconds / 60)
     .toString()
@@ -13,13 +22,15 @@ const formatTime = (totalSeconds: number): string => {
   return `${minutes}:${seconds}`;
 };
 
-const MeetingRecorder: FC = () => {
+const MeetingRecorder: FC<MeetingRecorderProps> = ({ meetingId: propMeetingId, autoStart = false, onUploadComplete }) => {
   const [status, setStatus] = useState<RecorderStatus>("idle");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Track the meetingId used for the current recording session
+  const activeMeetingIdRef = useRef<string | null>(propMeetingId || null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -121,39 +132,54 @@ const MeetingRecorder: FC = () => {
       setIsUploading(true);
       setUploadProgress(0);
 
-      // Step 1: Create an ad-hoc meeting to associate the recording with
-      const now = new Date();
-      const meetingRes = await apiClient.post("/meetings", {
-        title: `Quick Recording – ${now.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`,
-        description: "Recording created from Live Recorder",
-        scheduledStartTime: now.toISOString(),
-      });
-      const meetingData = meetingRes.data;
-      const meetingId: string =
-        meetingData?.data?.meeting?.id ?? meetingData?.meeting?.id ?? meetingData?.id;
+      // Step 1: Use the existing meetingId (from props) or create an ad-hoc one
+      let resolvedMeetingId = activeMeetingIdRef.current;
 
-      if (!meetingId) {
-        throw new Error("Failed to create meeting for recording");
+      if (!resolvedMeetingId) {
+        const now = new Date();
+        const meetingRes = await apiClient.post("/meetings", {
+          title: `Quick Recording – ${now.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`,
+          description: "Recording created from Live Recorder",
+          scheduledStartTime: now.toISOString(),
+        });
+        const meetingData = meetingRes.data;
+        resolvedMeetingId =
+          meetingData?.data?.meeting?.id ?? meetingData?.meeting?.id ?? meetingData?.id;
+
+        if (!resolvedMeetingId) {
+          throw new Error("Failed to create meeting for recording");
+        }
+        activeMeetingIdRef.current = resolvedMeetingId;
       }
 
       setUploadProgress(10);
 
-      // Step 2: Upload the recording to the correct endpoint
+      // Step 2: Upload the recording
       const file = new File([audioBlob], `recording-${Date.now()}.webm`, { type: audioBlob.type });
       const formData = new FormData();
       formData.append("recording", file);
 
-      await apiClient.post(`/meetings/${meetingId}/recording`, formData, {
+      await apiClient.post(`/meetings/${resolvedMeetingId}/recording`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
         onUploadProgress: (event) => {
           if (!event.total) return;
-          // Map upload progress from 10% to 100%
-          const progress = 10 + Math.round((event.loaded * 90) / event.total);
+          const progress = 10 + Math.round((event.loaded * 80) / event.total);
           setUploadProgress(progress);
         },
       });
 
-      toast.success("Recording uploaded! AI processing started.");
+      setUploadProgress(95);
+
+      // Step 3: Trigger AI processing (transcription → task extraction → MoM)
+      try {
+        await apiClient.post(`/meetings/${resolvedMeetingId}/process`);
+      } catch {
+        console.warn("[MeetingRecorder] /process call failed — AI processing may be delayed");
+      }
+
+      setUploadProgress(100);
+      toast.success("Recording uploaded! AI is generating MoM and tasks…");
+      onUploadComplete?.(resolvedMeetingId);
     } catch (error) {
       console.error(error);
       setErrorMessage("Upload failed. Please try recording again.");
@@ -269,6 +295,18 @@ const MeetingRecorder: FC = () => {
       setElapsedSeconds((previous) => previous + 1);
     }, 1000);
   };
+
+  useEffect(() => {
+    // Clear any stale error message when the component mounts
+    setErrorMessage(null);
+    // Auto-start recording if requested
+    if (autoStart) {
+      // Small delay to ensure the component is fully mounted
+      const t = window.setTimeout(() => { void startRecording(); }, 300);
+      return () => window.clearTimeout(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     return () => {

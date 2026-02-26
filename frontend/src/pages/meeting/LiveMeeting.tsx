@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState, type FC } from "react";
 import { Mic, MicOff, PhoneOff, Users, Captions } from "lucide-react";
 import { io, type Socket } from "socket.io-client";
+import { useParams, useNavigate } from "react-router-dom";
 import MeetingRecorder from "../../components/meeting/MeetingRecorder";
 import apiClient from "../../api/axios.config";
 import { useAuthStore } from "../../store/authStore";
+import { useQuery } from "@tanstack/react-query";
 
 type Participant = {
     id: string;
@@ -33,9 +35,30 @@ const formatDuration = (seconds: number): string => {
 const LiveMeeting: FC = () => {
     const user = useAuthStore((state) => state.user);
     const token = useAuthStore((state) => state.token);
+    const { id: meetingId } = useParams<{ id: string }>();
+    const navigate = useNavigate();
 
-    const [meetingTitle] = useState("Weekly Engineering Sync");
-    const [meetingId] = useState("meeting-live-001");
+    // Fetch meeting info for title and participants
+    const { data: meetingData } = useQuery<{ title: string; participants: Participant[] }>({
+        queryKey: ['meeting-live', meetingId],
+        queryFn: async () => {
+            const { data } = await apiClient.get(`/meetings/${meetingId}`);
+            const m = data?.data?.meeting;
+            return {
+                title: m?.title || 'Meeting',
+                participants: (m?.participants || []).map((p: any) => ({
+                    id: p.user.id,
+                    name: p.user.name || p.user.email,
+                    isOnline: true,
+                    isMuted: false,
+                })),
+            };
+        },
+        enabled: !!meetingId,
+    });
+
+    const meetingTitle = meetingData?.title || 'Live Meeting';
+
     const [isTranscriptEnabled, setIsTranscriptEnabled] = useState(true);
     const [isMuted, setIsMuted] = useState(false);
     const [isEndingMeeting, setIsEndingMeeting] = useState(false);
@@ -44,18 +67,9 @@ const LiveMeeting: FC = () => {
         "connecting"
     );
     const [participants, setParticipants] = useState<Participant[]>([
-        { id: "p-1", name: user?.fullName ?? "You", isOnline: true, isMuted: false },
-        { id: "p-2", name: "Sarah Smith", isOnline: true, isMuted: false },
-        { id: "p-3", name: "John Doe", isOnline: true, isMuted: true },
+        { id: "p-self", name: user?.fullName ?? "You", isOnline: true, isMuted: false },
     ]);
-    const [transcript, setTranscript] = useState<TranscriptChunk[]>([
-        {
-            id: "t-1",
-            speaker: "Sarah Smith",
-            text: "Let's review the sprint blockers and action items.",
-            timestamp: new Date().toLocaleTimeString(),
-        },
-    ]);
+    const [transcript, setTranscript] = useState<TranscriptChunk[]>([]);
 
     const socketUrl = useMemo(() => {
         const envUrl = (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_SOCKET_URL;
@@ -135,6 +149,16 @@ const LiveMeeting: FC = () => {
         );
     };
 
+    // Populate participants from API data
+    useEffect(() => {
+        if (meetingData?.participants && meetingData.participants.length > 0) {
+            setParticipants([
+                { id: "p-self", name: user?.fullName ?? "You", isOnline: true, isMuted: false },
+                ...meetingData.participants.filter((p) => p.name !== (user?.fullName ?? "You")),
+            ]);
+        }
+    }, [meetingData, user?.fullName]);
+
     const handleEndMeeting = async () => {
         if (isEndingMeeting) {
             return;
@@ -150,10 +174,14 @@ const LiveMeeting: FC = () => {
                 {
                     id: `t-${Date.now()}`,
                     speaker: "System",
-                    text: "Meeting ended. AI processing has started for summary and action items.",
+                    text: "Meeting ended. AI is processing the recording — you'll be redirected to review tasks and minutes shortly.",
                     timestamp: new Date().toLocaleTimeString(),
                 },
             ]);
+            // Navigate to meeting detail after a short delay
+            setTimeout(() => {
+                navigate(`/meetings/${meetingId}`);
+            }, 2500);
         } catch {
             setTranscript((previous) => [
                 ...previous,
@@ -181,10 +209,10 @@ const LiveMeeting: FC = () => {
                     <div className="flex flex-wrap items-center gap-2">
                         <span
                             className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide ${connectionStatus === "connected"
-                                    ? "bg-emerald-100 text-emerald-700"
-                                    : connectionStatus === "connecting"
-                                        ? "bg-amber-100 text-amber-700"
-                                        : "bg-red-100 text-red-700"
+                                ? "bg-emerald-100 text-emerald-700"
+                                : connectionStatus === "connecting"
+                                    ? "bg-amber-100 text-amber-700"
+                                    : "bg-red-100 text-red-700"
                                 }`}
                         >
                             {connectionStatus}
@@ -198,7 +226,13 @@ const LiveMeeting: FC = () => {
 
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
                 <div className="space-y-6 xl:col-span-8">
-                    <MeetingRecorder />
+                    <MeetingRecorder
+                        meetingId={meetingId}
+                        autoStart={true}
+                        onUploadComplete={(recordedMeetingId) => {
+                            setTimeout(() => navigate(`/meetings/${recordedMeetingId}/review`), 1500);
+                        }}
+                    />
 
                     <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                         <div className="mb-4 flex items-center justify-between">
@@ -209,8 +243,8 @@ const LiveMeeting: FC = () => {
                             <button
                                 onClick={handleToggleMute}
                                 className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium ${isMuted
-                                        ? "bg-amber-100 text-amber-800 hover:bg-amber-200"
-                                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                                    ? "bg-amber-100 text-amber-800 hover:bg-amber-200"
+                                    : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                                     }`}
                             >
                                 {isMuted ? <MicOff size={16} /> : <Mic size={16} />}
@@ -220,8 +254,8 @@ const LiveMeeting: FC = () => {
                             <button
                                 onClick={() => setIsTranscriptEnabled((previous) => !previous)}
                                 className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium ${isTranscriptEnabled
-                                        ? "bg-blue-100 text-blue-800 hover:bg-blue-200"
-                                        : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                                    ? "bg-blue-100 text-blue-800 hover:bg-blue-200"
+                                    : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                                     }`}
                             >
                                 <Captions size={16} />

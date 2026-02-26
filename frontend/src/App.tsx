@@ -13,6 +13,7 @@ const Dashboard = lazy(() => import('./pages/dashboard/Dashboard'))
 const LiveMeeting = lazy(() => import('./pages/meeting/LiveMeeting'))
 const MeetingListPage = lazy(() => import('./pages/meeting/MeetingList'))
 const MeetingDetail = lazy(() => import('./pages/meeting/MeetingDetail'))
+const MeetingReview = lazy(() => import('./pages/meeting/MeetingReview'))
 const MyTasks = lazy(() => import('./pages/task/MyTasks'))
 const TaskDetail = lazy(() => import('./pages/task/TaskDetail'))
 const WorkspaceList = lazy(() => import('./pages/workspace/WorkspaceList'))
@@ -116,6 +117,7 @@ function App() {
           <Route path="meetings" element={<SuspenseWrapper><MeetingListPage /></SuspenseWrapper>} />
           <Route path="meetings/:id" element={<SuspenseWrapper><MeetingDetail /></SuspenseWrapper>} />
           <Route path="meetings/:id/live" element={<SuspenseWrapper><LiveMeeting /></SuspenseWrapper>} />
+          <Route path="meetings/:id/review" element={<SuspenseWrapper><MeetingReview /></SuspenseWrapper>} />
 
           {/* Tasks */}
           <Route path="tasks/my" element={<SuspenseWrapper><MyTasks /></SuspenseWrapper>} />

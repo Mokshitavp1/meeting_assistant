@@ -9,6 +9,8 @@ import {
     BadRequestError,
 } from '../middleware/error.middleware';
 import * as workspaceService from './workspace.service';
+import { queueTranscriptionJob } from '../jobs/transcription.job';
+import { queueTaskExtractionJob } from '../jobs/task-extraction.job';
 
 /**
  * Meeting Service
@@ -483,17 +485,48 @@ export async function uploadRecording(
         throw new NotFoundError('Meeting');
     }
 
-    // Delete old recording from S3 if exists
-    if (meeting.recordingPath) {
-        const oldKey = meeting.recordingPath.replace(`https://${S3_BUCKET}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/`, '');
-        await deleteFromS3(oldKey);
+    const awsKeyId = process.env.AWS_ACCESS_KEY_ID || '';
+    const hasAwsCredentials = !!(
+        awsKeyId &&
+        (awsKeyId.startsWith('AKIA') || awsKeyId.startsWith('ASIA')) &&
+        process.env.AWS_SECRET_ACCESS_KEY &&
+        !process.env.AWS_SECRET_ACCESS_KEY.includes('your-') &&
+        process.env.AWS_S3_BUCKET &&
+        !process.env.AWS_S3_BUCKET.includes('your-')
+    );
+
+    let recordingUrl: string;
+
+    if (hasAwsCredentials) {
+        // Delete old recording from S3 if exists
+        if (meeting.recordingPath && meeting.recordingPath.includes('.amazonaws.com/')) {
+            const oldKey = meeting.recordingPath.replace(`https://${S3_BUCKET}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/`, '');
+            await deleteFromS3(oldKey);
+        }
+
+        // Generate S3 key and upload
+        const s3Key = generateS3Key(meetingId, filename);
+        recordingUrl = await uploadToS3(filePath, s3Key, mimetype);
+
+        // Delete local file after successful S3 upload
+        try {
+            await fs.unlink(filePath);
+        } catch (error) {
+            console.error('Error deleting local file:', error);
+        }
+    } else {
+        // No S3 credentials — serve local file directly
+        // Normalize path separators (Windows uses backslashes)
+        const normalizedPath = filePath.replace(/\\/g, '/');
+        const relativePath = normalizedPath.startsWith('./')
+            ? normalizedPath.slice(1) // './uploads/recordings/x' → '/uploads/recordings/x'
+            : normalizedPath.startsWith('uploads/')
+                ? '/' + normalizedPath // 'uploads/recordings/x' → '/uploads/recordings/x'
+                : normalizedPath;
+        const baseUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 4000}`;
+        recordingUrl = `${baseUrl}${relativePath}`;
+        console.log(`[uploadRecording] No AWS credentials — using local URL: ${recordingUrl}`);
     }
-
-    // Generate S3 key
-    const s3Key = generateS3Key(meetingId, filename);
-
-    // Upload to S3
-    const recordingUrl = await uploadToS3(filePath, s3Key, mimetype);
 
     // Update meeting with recording URL
     await prisma.meeting.update({
@@ -503,13 +536,6 @@ export async function uploadRecording(
             recordingUrl: recordingUrl,
         },
     });
-
-    // Delete local file after successful upload
-    try {
-        await fs.unlink(filePath);
-    } catch (error) {
-        console.error('Error deleting local file:', error);
-    }
 
     return {
         recordingUrl,
@@ -568,21 +594,156 @@ export async function triggerAIProcessing(meetingId: string, userId: string): Pr
         throw new NotFoundError('Meeting');
     }
 
-    if (!meeting.recordingUrl) {
+    if (!meeting.recordingPath && !meeting.recordingUrl) {
         throw new BadRequestError('No recording found. Upload a recording first.');
     }
 
-    // Create job data
-    const jobData: AIProcessingJob = {
-        meetingId: meeting.id,
-        recordingPath: meeting.recordingPath || '',
-        recordingUrl: meeting.recordingUrl,
-    };
+    const audioPath = meeting.recordingPath || meeting.recordingUrl || '';
 
-    // Add job to queue for background processing
-    await processingQueue.add('process-meeting', jobData);
+    // Check if real AI credentials exist for transcription
+    const hasAssemblyAI = !!(
+        process.env.ASSEMBLYAI_API_KEY &&
+        !process.env.ASSEMBLYAI_API_KEY.includes('your-') &&
+        process.env.ASSEMBLYAI_API_KEY.length > 10
+    );
 
-    console.log(`[AI Processing] Initiated for meeting ${meetingId}`);
+    if (hasAssemblyAI) {
+        // Real path: queue transcription → AI extraction pipeline
+        await queueTranscriptionJob({ meetingId, audioFilePath: audioPath });
+        console.log(`[AI Processing] Queued transcription job for meeting ${meetingId}`);
+    } else {
+        // Dev fallback: skip transcription, generate synthetic MoM + task stubs
+        console.log(`[AI Processing] No AssemblyAI key — running dev fallback for meeting ${meetingId}`);
+        await runDevFallbackProcessing(meetingId);
+    }
+}
+
+/**
+ * Dev-mode fallback: generate placeholder MoM and extract tasks via OpenAI/Anthropic
+ * (or produce sample stubs if those keys are also absent).
+ */
+async function runDevFallbackProcessing(meetingId: string): Promise<void> {
+    const meeting = await prisma.meeting.findUnique({
+        where: { id: meetingId },
+        select: {
+            id: true, title: true,
+            participants: {
+                select: {
+                    userId: true,
+                    user: { select: { id: true, name: true, email: true } },
+                },
+            },
+        },
+    });
+    if (!meeting) return;
+
+    const now = new Date().toISOString();
+    const participantNames = meeting.participants.map((p) => p.user.name || p.user.email).join(', ');
+    const syntheticTranscript = [
+        `[Meeting: ${meeting.title} | ${now}]`,
+        `Participants: ${participantNames || 'Unknown'}`,
+        '',
+        'Alice: Let\'s discuss the project timeline and assign responsibilities.',
+        'Bob: I will handle the backend API integration by end of next week.',
+        'Alice: Great. I\'ll prepare the design mockups by Wednesday.',
+        'Charlie: I can review the designs on Thursday and provide feedback.',
+        'Alice: Perfect. Bob, please also write unit tests for the new endpoints.',
+        'Bob: Sure, I\'ll have those done by Friday.',
+        'Alice: Let\'s set up a follow-up meeting next Monday to review progress.',
+    ].join('\n');
+
+    const minutesOfMeeting = [
+        `# Minutes of Meeting — ${meeting.title}`,
+        `**Date:** ${new Date().toLocaleDateString()}`,
+        `**Participants:** ${participantNames || 'Unknown'}`,
+        '',
+        '## Discussion',
+        '- Reviewed project timeline and assigned responsibilities.',
+        '- Agreed on design and backend deliverables.',
+        '- Scheduled a follow-up review meeting.',
+        '',
+        '## Action Items',
+        '- Backend API integration (Bob) — due end of next week',
+        '- Design mockups (Alice) — due Wednesday',
+        '- Design review and feedback (Charlie) — due Thursday',
+        '- Unit tests for new endpoints (Bob) — due Friday',
+        '- Follow-up meeting — next Monday',
+    ].join('\n');
+
+    // Update meeting with synthetic minutes
+    await prisma.meeting.update({
+        where: { id: meetingId },
+        data: {
+            transcriptUrl: `internal://dev-fallback/${meetingId}`,
+            minutesOfMeeting,
+            summary: 'AI generated minutes (dev fallback — no AssemblyAI key configured).',
+        },
+    });
+
+    // Check if OpenAI/Anthropic is available for real task extraction
+    const hasOpenAI = !!(
+        process.env.OPENAI_API_KEY &&
+        !process.env.OPENAI_API_KEY.includes('your-') &&
+        process.env.OPENAI_API_KEY.startsWith('sk-')
+    );
+    const hasAnthropic = !!(
+        process.env.ANTHROPIC_API_KEY &&
+        !process.env.ANTHROPIC_API_KEY.includes('your-') &&
+        process.env.ANTHROPIC_API_KEY.startsWith('sk-ant-')
+    );
+
+    if (hasOpenAI || hasAnthropic) {
+        // Use real AI to extract tasks from the synthetic transcript
+        await queueTaskExtractionJob({ meetingId, transcript: syntheticTranscript });
+    } else {
+        // Full dev fallback: create sample tasks directly in DB
+        console.log(`[AI Processing] No AI keys — creating sample tasks for meeting ${meetingId}`);
+        const UNCONFIRMED = '[UNCONFIRMED_AI_TASK]';
+
+        // Map first few participants to tasks
+        const participants = meeting.participants;
+        const sampleTasks = [
+            {
+                title: 'Complete backend API integration',
+                description: `${UNCONFIRMED} Implement and test the backend API endpoints as discussed.`,
+                assignedToId: participants[1]?.userId || participants[0]?.userId || null,
+                dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                priority: 'high' as const,
+            },
+            {
+                title: 'Prepare design mockups',
+                description: `${UNCONFIRMED} Create UI/UX design mockups for review.`,
+                assignedToId: participants[0]?.userId || null,
+                dueDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+                priority: 'medium' as const,
+            },
+            {
+                title: 'Write unit tests for new endpoints',
+                description: `${UNCONFIRMED} Cover all new API endpoints with unit tests.`,
+                assignedToId: participants[1]?.userId || null,
+                dueDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
+                priority: 'medium' as const,
+            },
+        ];
+
+        await prisma.$transaction(
+            sampleTasks.map((task) =>
+                prisma.task.create({
+                    data: {
+                        meetingId,
+                        title: task.title,
+                        description: task.description,
+                        assignedToId: task.assignedToId,
+                        dueDate: task.dueDate,
+                        status: 'pending',
+                        priority: task.priority,
+                        isConfirmed: false,
+                    },
+                })
+            )
+        );
+        console.log(`[AI Processing] Created ${sampleTasks.length} sample tasks for meeting ${meetingId}`);
+    }
 }
 
 /**

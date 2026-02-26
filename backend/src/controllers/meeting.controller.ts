@@ -9,6 +9,9 @@ import {
 import { prisma } from '../config/database';
 import * as workspaceService from '../services/workspace.service';
 import * as meetingService from '../services/meeting.service';
+import { sendTaskAssignmentEmail } from '../services/email.service';
+import { createTaskCalendarEvent } from '../services/calender.service';
+import { setJSON, getJSON } from '../config/redis';
 
 /**
  * Meeting Controller
@@ -341,6 +344,16 @@ export const endMeeting = asyncHandler(
             req.user.id
         );
 
+        // If the meeting already has a recording, trigger AI processing now
+        if (updatedMeeting.recordingPath || updatedMeeting.recordingUrl) {
+            try {
+                await meetingService.triggerAIProcessing(id, req.user.id);
+            } catch (err) {
+                // Non-fatal — processing will be retried via /process endpoint
+                console.warn('[endMeeting] Could not trigger AI processing:', (err as Error).message);
+            }
+        }
+
         res.status(200).json({
             success: true,
             message: 'Meeting ended successfully',
@@ -380,9 +393,17 @@ export const uploadRecording = asyncHandler(
             req.user.id
         );
 
+        // Auto-trigger AI processing after upload
+        try {
+            await meetingService.triggerAIProcessing(id, req.user.id);
+        } catch (err) {
+            // Non-fatal — client can call /process manually
+            console.warn('[uploadRecording] Could not auto-trigger AI processing:', (err as Error).message);
+        }
+
         res.status(200).json({
             success: true,
-            message: 'Recording uploaded successfully',
+            message: 'Recording uploaded successfully. AI processing has started.',
             data: result,
         });
     }
@@ -454,6 +475,293 @@ export const processMeeting = asyncHandler(
                 meetingId: id,
                 status: 'processing',
                 estimatedTime: '2-5 minutes',
+            },
+        });
+    }
+);
+
+const UNCONFIRMED_PREFIX = '[UNCONFIRMED_AI_TASK]';
+
+/**
+ * Review Meeting - Get AI-extracted tasks and MoM for admin review
+ * GET /api/v1/meetings/:id/review
+ */
+export const reviewMeeting = asyncHandler(
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+        if (!req.user) {
+            throw new AuthorizationError('Authentication required');
+        }
+
+        const id = getParamId(req.params.id);
+
+        const meeting = await prisma.meeting.findUnique({
+            where: { id },
+            select: {
+                id: true,
+                title: true,
+                status: true,
+                minutesOfMeeting: true,
+                summary: true,
+                createdById: true,
+                workspaceId: true,
+                participants: {
+                    select: {
+                        userId: true,
+                        role: true,
+                        user: {
+                            select: {
+                                id: true,
+                                name: true,
+                                email: true,
+                            },
+                        },
+                    },
+                },
+                tasks: {
+                    where: { isConfirmed: false },
+                    select: {
+                        id: true,
+                        title: true,
+                        description: true,
+                        priority: true,
+                        dueDate: true,
+                        isConfirmed: true,
+                        assignedToId: true,
+                        assignedTo: {
+                            select: {
+                                id: true,
+                                name: true,
+                                email: true,
+                            },
+                        },
+                    },
+                    orderBy: { createdAt: 'asc' },
+                },
+            },
+        });
+
+        if (!meeting) {
+            throw new NotFoundError('Meeting');
+        }
+
+        // Check access: creator, admin, or organizer participant
+        const isCreator = meeting.createdById === req.user.id;
+        const isAdmin = req.user.role === 'admin';
+        const isOrganizer = meeting.participants.some(
+            (p) => p.userId === req.user!.id && p.role === 'organizer'
+        );
+
+        if (!isCreator && !isAdmin && !isOrganizer) {
+            if (meeting.workspaceId) {
+                const role = await workspaceService.getUserRole(meeting.workspaceId, req.user.id);
+                if (role !== 'admin') {
+                    throw new AuthorizationError('Only meeting organizers or workspace admins can review meeting tasks');
+                }
+            } else {
+                throw new AuthorizationError('Only the meeting creator can review this meeting');
+            }
+        }
+
+        // Strip the unconfirmed prefix from descriptions for display
+        const tasks = meeting.tasks.map((task) => ({
+            ...task,
+            description: task.description
+                ? task.description.replace(UNCONFIRMED_PREFIX, '').trim()
+                : '',
+        }));
+
+        res.status(200).json({
+            success: true,
+            data: {
+                meetingId: meeting.id,
+                title: meeting.title,
+                status: meeting.status,
+                minutesOfMeeting: meeting.minutesOfMeeting || '',
+                summary: meeting.summary || '',
+                participants: meeting.participants.map((p) => p.user),
+                unconfirmedTasks: tasks,
+                pendingCount: tasks.length,
+            },
+        });
+    }
+);
+
+const confirmTaskSchema = z.object({
+    id: z.string(),
+    title: z.string().min(2).max(200),
+    description: z.string().max(4000).optional().default(''),
+    assignedToId: z.string().nullable().optional(),
+    priority: z.enum(['low', 'medium', 'high']).optional().default('medium'),
+    dueDate: z.string().datetime().nullable().optional(),
+});
+
+const confirmMeetingSchema = z.object({
+    tasks: z.array(confirmTaskSchema),
+    minutesOfMeeting: z.string().optional(),
+    deleteTaskIds: z.array(z.string()).optional().default([]),
+});
+
+/**
+ * Confirm Meeting Tasks - Admin confirms/edits extracted tasks and MoM
+ * POST /api/v1/meetings/:id/confirm
+ */
+export const confirmMeetingTasks = asyncHandler(
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+        if (!req.user) {
+            throw new AuthorizationError('Authentication required');
+        }
+
+        const id = getParamId(req.params.id);
+        const { tasks, minutesOfMeeting, deleteTaskIds } = confirmMeetingSchema.parse(req.body);
+
+        const meeting = await prisma.meeting.findUnique({
+            where: { id },
+            select: {
+                id: true,
+                title: true,
+                createdById: true,
+                workspaceId: true,
+                participants: {
+                    select: { userId: true, role: true },
+                },
+            },
+        });
+
+        if (!meeting) {
+            throw new NotFoundError('Meeting');
+        }
+
+        // Check access
+        const isCreator = meeting.createdById === req.user.id;
+        const isAdmin = req.user.role === 'admin';
+        const isOrganizer = meeting.participants.some(
+            (p) => p.userId === req.user!.id && p.role === 'organizer'
+        );
+
+        if (!isCreator && !isAdmin && !isOrganizer) {
+            if (meeting.workspaceId) {
+                const role = await workspaceService.getUserRole(meeting.workspaceId, req.user.id);
+                if (role !== 'admin') {
+                    throw new AuthorizationError('Only meeting organizers or workspace admins can confirm tasks');
+                }
+            } else {
+                throw new AuthorizationError('Only the meeting creator can confirm tasks');
+            }
+        }
+
+        // Delete removed tasks
+        if (deleteTaskIds.length > 0) {
+            await prisma.task.deleteMany({
+                where: {
+                    id: { in: deleteTaskIds },
+                    meetingId: id,
+                    isConfirmed: false,
+                },
+            });
+        }
+
+        // Update/confirm each task in a transaction
+        const confirmedTasks = await prisma.$transaction(
+            tasks.map((task) =>
+                prisma.task.update({
+                    where: { id: task.id },
+                    data: {
+                        title: task.title,
+                        description: task.description,
+                        assignedToId: task.assignedToId !== undefined ? task.assignedToId : undefined,
+                        priority: task.priority,
+                        dueDate: task.dueDate ? new Date(task.dueDate) : task.dueDate === null ? null : undefined,
+                        isConfirmed: true,
+                        status: 'pending',
+                    },
+                    include: {
+                        assignedTo: {
+                            select: { id: true, name: true, email: true },
+                        },
+                    },
+                })
+            )
+        );
+
+        // Update meeting MoM if provided
+        if (minutesOfMeeting !== undefined) {
+            await prisma.meeting.update({
+                where: { id },
+                data: { minutesOfMeeting },
+            });
+        }
+
+        // Post-confirmation: calendar events + emails (best-effort, non-blocking)
+        const meetingTitle = meeting.title;
+        const backendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+        for (const task of confirmedTasks) {
+            const assignee = task.assignedTo;
+            if (!assignee) continue;
+
+            // Send task assignment email
+            try {
+                await sendTaskAssignmentEmail({
+                    to: assignee.email,
+                    assigneeName: assignee.name || assignee.email,
+                    taskTitle: task.title,
+                    dueDate: task.dueDate?.toISOString() ?? null,
+                    meetingTitle,
+                    taskLink: `${backendUrl}/tasks/${task.id}`,
+                });
+            } catch (emailErr) {
+                console.error(`[ConfirmTasks] Email failed for task=${task.id}:`, emailErr);
+            }
+
+            // Add to Google Calendar if user has connected it
+            if (task.dueDate) {
+                try {
+                    const calEvent = await createTaskCalendarEvent({
+                        userId: assignee.id,
+                        taskId: task.id,
+                        title: task.title,
+                        description: task.description || undefined,
+                        dueDate: task.dueDate.toISOString(),
+                    });
+
+                    // Store the calendar event ID on the task
+                    await prisma.task.update({
+                        where: { id: task.id },
+                        data: { calendarEventId: calEvent.eventId },
+                    });
+                } catch (calErr) {
+                    // Calendar not configured is expected — log and skip
+                    console.info(`[ConfirmTasks] Calendar skip task=${task.id}: ${(calErr as Error).message}`);
+                }
+            }
+
+            // Create in-app notification in Redis
+            try {
+                const notifKey = `notifications:user:${assignee.id}`;
+                const existing = (await getJSON<any[]>(notifKey)) || [];
+                const notification = {
+                    id: `notif_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                    type: 'task-assignment',
+                    title: 'New Task Assigned',
+                    message: `You have been assigned: "${task.title}"${task.dueDate ? ` — due ${new Date(task.dueDate).toLocaleDateString()}` : ''}`,
+                    taskId: task.id,
+                    meetingTitle,
+                    createdAt: new Date().toISOString(),
+                    read: false,
+                };
+                const updated = [notification, ...existing].slice(0, 200);
+                await setJSON(notifKey, updated, 60 * 60 * 24 * 30);
+            } catch (notifErr) {
+                console.error(`[ConfirmTasks] In-app notification failed user=${assignee.id}:`, notifErr);
+            }
+        }
+
+        res.status(200).json({
+            success: true,
+            message: `${confirmedTasks.length} task(s) confirmed. Notifications and emails sent.`,
+            data: {
+                confirmedCount: confirmedTasks.length,
+                tasks: confirmedTasks,
             },
         });
     }
