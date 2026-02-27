@@ -288,7 +288,6 @@ async function processTaskExtractionJob(
                     dueDate: parseDueDate(task.deadline),
                     status: 'pending',
                     priority: mapConfidenceToPriority(task.confidence),
-                    isConfirmed: false,
                 },
             });
         })

@@ -12,6 +12,8 @@ import {
     processMeeting,
     reviewMeeting,
     confirmMeetingTasks,
+    addParticipant,
+    removeParticipant,
 } from '../controllers/meeting.controller';
 import { authenticate } from '../middleware/auth.middleware';
 import { uploadRecording as uploadRecordingMiddleware } from '../config/upload';
@@ -109,5 +111,19 @@ router.get('/:id/review', reviewMeeting);
  * @access  Private (creator, organizer, workspace admin)
  */
 router.post('/:id/confirm', confirmMeetingTasks);
+
+/**
+ * @route   POST /api/v1/meetings/:id/participants
+ * @desc    Add a participant to a meeting by email
+ * @access  Private (meeting creator or admin)
+ */
+router.post('/:id/participants', addParticipant);
+
+/**
+ * @route   DELETE /api/v1/meetings/:id/participants/:participantId
+ * @desc    Remove a participant from a meeting
+ * @access  Private (meeting creator or admin)
+ */
+router.delete('/:id/participants/:participantId', removeParticipant);
 
 export default router;

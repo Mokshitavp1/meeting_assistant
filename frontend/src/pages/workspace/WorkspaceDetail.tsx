@@ -2,11 +2,12 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
     ArrowLeft, Users, Calendar, Copy, LinkIcon, Settings,
-    Loader2, Building2, Trash2
+    Loader2, Building2, Trash2, CalendarPlus
 } from 'lucide-react'
 import apiClient from '../../api/axios.config'
 import toast from 'react-hot-toast'
 import { useState } from 'react'
+import WorkspaceScheduleMeetingModal from '../../components/workspace/WorkspaceScheduleMeetingModal'
 
 interface WorkspaceMember {
     id: string
@@ -33,6 +34,7 @@ const WorkspaceDetail = () => {
     const [isEditing, setIsEditing] = useState(false)
     const [editName, setEditName] = useState('')
     const [editDesc, setEditDesc] = useState('')
+    const [showScheduleMeeting, setShowScheduleMeeting] = useState(false)
 
     const { data: workspace, isLoading, error } = useQuery<Workspace>({
         queryKey: ['workspace', id],
@@ -118,6 +120,18 @@ const WorkspaceDetail = () => {
 
     return (
         <div className="space-y-6">
+            {showScheduleMeeting && workspace && (
+                <WorkspaceScheduleMeetingModal
+                    workspaceId={workspace.id}
+                    workspaceName={workspace.name}
+                    members={workspace.members || []}
+                    onClose={() => setShowScheduleMeeting(false)}
+                    onSuccess={() => {
+                        queryClient.invalidateQueries({ queryKey: ['workspace', id] })
+                        queryClient.invalidateQueries({ queryKey: ['meetings'] })
+                    }}
+                />
+            )}
             {/* Back button */}
             <button
                 onClick={() => navigate('/workspaces')}
@@ -188,6 +202,13 @@ const WorkspaceDetail = () => {
                     </div>
 
                     <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setShowScheduleMeeting(true)}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+                            title="Schedule a meeting for all workspace members"
+                        >
+                            <CalendarPlus size={15} /> Schedule Meeting
+                        </button>
                         {!isEditing && (
                             <button
                                 onClick={startEdit}
@@ -266,9 +287,17 @@ const WorkspaceDetail = () => {
             </div>
 
             {/* Recent Meetings in this workspace */}
-            {workspace.meetings && workspace.meetings.length > 0 && (
-                <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-                    <h2 className="text-lg font-semibold text-gray-900 mb-4">Meetings</h2>
+            <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-semibold text-gray-900">Meetings</h2>
+                    <button
+                        onClick={() => setShowScheduleMeeting(true)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors"
+                    >
+                        <CalendarPlus size={14} /> Schedule Meeting
+                    </button>
+                </div>
+                {workspace.meetings && workspace.meetings.length > 0 ? (
                     <div className="space-y-2">
                         {workspace.meetings.map((m) => (
                             <div
@@ -287,8 +316,10 @@ const WorkspaceDetail = () => {
                             </div>
                         ))}
                     </div>
-                </div>
-            )}
+                ) : (
+                    <p className="text-sm text-gray-500">No meetings scheduled yet. Use the button above to schedule one.</p>
+                )}
+            </div>
         </div>
     )
 }

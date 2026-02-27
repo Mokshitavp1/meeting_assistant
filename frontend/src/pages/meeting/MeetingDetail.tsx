@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
     Calendar, Clock, Users, ArrowLeft, Play, Square,
-    Trash2, Edit3, Loader2, Video, ClipboardList
+    Trash2, Edit3, Loader2, Video, ClipboardList, UserPlus, X
 } from 'lucide-react'
 import apiClient from '../../api/axios.config'
 import toast from 'react-hot-toast'
@@ -32,6 +32,8 @@ const MeetingDetail = () => {
     const [isEditing, setIsEditing] = useState(false)
     const [editTitle, setEditTitle] = useState('')
     const [editDesc, setEditDesc] = useState('')
+    const [showAddParticipant, setShowAddParticipant] = useState(false)
+    const [participantEmail, setParticipantEmail] = useState('')
 
     const { data: meeting, isLoading, error } = useQuery<Meeting>({
         queryKey: ['meeting', id],
@@ -92,6 +94,31 @@ const MeetingDetail = () => {
             navigate('/meetings')
         },
         onError: (err: any) => toast.error(err?.response?.data?.message || 'Failed to delete meeting'),
+    })
+
+    const addParticipantMutation = useMutation({
+        mutationFn: async (email: string) => {
+            const { data } = await apiClient.post(`/meetings/${id}/participants`, { email })
+            return data
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['meeting', id] })
+            toast.success('Participant added')
+            setParticipantEmail('')
+            setShowAddParticipant(false)
+        },
+        onError: (err: any) => toast.error(err?.response?.data?.message || 'Failed to add participant'),
+    })
+
+    const removeParticipantMutation = useMutation({
+        mutationFn: async (participantId: string) => {
+            await apiClient.delete(`/meetings/${id}/participants/${participantId}`)
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['meeting', id] })
+            toast.success('Participant removed')
+        },
+        onError: (err: any) => toast.error(err?.response?.data?.message || 'Failed to remove participant'),
     })
 
     const getStatusColor = (status: string) => {
@@ -291,9 +318,56 @@ const MeetingDetail = () => {
             </div>
 
             {/* Participants */}
-            {meeting.participants && meeting.participants.length > 0 && (
-                <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-                    <h2 className="text-lg font-semibold text-gray-900 mb-4">Participants</h2>
+            <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-semibold text-gray-900">Participants</h2>
+                    {meeting.status === 'scheduled' && (
+                        <button
+                            onClick={() => setShowAddParticipant((v) => !v)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors"
+                        >
+                            <UserPlus size={15} /> Add Participant
+                        </button>
+                    )}
+                </div>
+
+                {showAddParticipant && (
+                    <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-100">
+                        <p className="text-xs font-medium text-blue-700 mb-2">Enter the email address of the person to add:</p>
+                        <div className="flex gap-2">
+                            <input
+                                type="email"
+                                value={participantEmail}
+                                onChange={(e) => setParticipantEmail(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && participantEmail.trim()) {
+                                        addParticipantMutation.mutate(participantEmail.trim())
+                                    }
+                                }}
+                                placeholder="colleague@example.com"
+                                className="flex-1 px-3 py-1.5 text-sm border border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                autoFocus
+                            />
+                            <button
+                                onClick={() => {
+                                    if (participantEmail.trim()) addParticipantMutation.mutate(participantEmail.trim())
+                                }}
+                                disabled={addParticipantMutation.isPending || !participantEmail.trim()}
+                                className="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                            >
+                                {addParticipantMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : 'Add'}
+                            </button>
+                            <button
+                                onClick={() => { setShowAddParticipant(false); setParticipantEmail('') }}
+                                className="p-1.5 text-gray-400 hover:text-gray-600"
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {meeting.participants && meeting.participants.length > 0 ? (
                     <div className="space-y-2">
                         {meeting.participants.map((p) => (
                             <div key={p.id} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
@@ -311,12 +385,26 @@ const MeetingDetail = () => {
                                     {p.attended && (
                                         <span className="text-xs font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full">Attended</span>
                                     )}
+                                    {p.role !== 'organizer' && meeting.status === 'scheduled' && (
+                                        <button
+                                            onClick={() => {
+                                                if (window.confirm(`Remove ${p.user.name || p.user.email} from meeting?`))
+                                                    removeParticipantMutation.mutate(p.id)
+                                            }}
+                                            className="p-1 text-red-400 hover:text-red-600 transition-colors"
+                                            title="Remove participant"
+                                        >
+                                            <X size={14} />
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         ))}
                     </div>
-                </div>
-            )}
+                ) : (
+                    <p className="text-sm text-gray-500">No participants yet.</p>
+                )}
+            </div>
 
             {/* Summary / Minutes */}
             {meeting.summary && (

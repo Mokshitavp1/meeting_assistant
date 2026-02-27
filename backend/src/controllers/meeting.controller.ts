@@ -199,6 +199,38 @@ export const createMeeting = asyncHandler(
             participantIds,
         });
 
+        // Notify participants (excluding the creator) about the new meeting
+        if (participantIds.length > 0) {
+            const NOTIFICATION_TTL = 60 * 60 * 24 * 30;
+            const scheduledAt = new Date(scheduledStartTime).toLocaleDateString(undefined, {
+                weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
+            });
+            const scheduledTime = new Date(scheduledStartTime).toLocaleTimeString([], {
+                hour: '2-digit', minute: '2-digit',
+            });
+
+            await Promise.allSettled(
+                participantIds
+                    .filter((pid) => pid !== req.user!.id)
+                    .map(async (userId) => {
+                        const notifKey = `notifications:user:${userId}`;
+                        const existing = (await getJSON<any[]>(notifKey)) || [];
+                        const notification = {
+                            id: `notif_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                            type: 'meeting-invite',
+                            title: 'You\'ve been invited to a meeting',
+                            message: `"${title}" has been scheduled for ${scheduledAt} at ${scheduledTime}.`,
+                            meetingId: meeting.id,
+                            meetingTitle: title,
+                            createdAt: new Date().toISOString(),
+                            read: false,
+                        };
+                        const updated = [notification, ...existing].slice(0, 200);
+                        await setJSON(notifKey, updated, NOTIFICATION_TTL);
+                    })
+            );
+        }
+
         res.status(201).json({
             success: true,
             message: 'Meeting created successfully',
@@ -582,6 +614,142 @@ export const reviewMeeting = asyncHandler(
                 unconfirmedTasks: tasks,
                 pendingCount: tasks.length,
             },
+        });
+    }
+);
+
+/**
+ * Add Participant - Add a user to an existing meeting by email
+ * POST /api/v1/meetings/:id/participants
+ */
+export const addParticipant = asyncHandler(
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+        if (!req.user) {
+            throw new AuthorizationError('Authentication required');
+        }
+
+        const id = getParamId(req.params.id);
+        const { email } = z.object({ email: z.string().email() }).parse(req.body);
+
+        const meeting = await prisma.meeting.findUnique({
+            where: { id },
+            select: { id: true, title: true, createdById: true, workspaceId: true, scheduledStartTime: true },
+        });
+
+        if (!meeting) {
+            throw new NotFoundError('Meeting');
+        }
+
+        if (meeting.createdById !== req.user.id && req.user.role !== 'admin') {
+            throw new AuthorizationError('Only the meeting organizer can add participants');
+        }
+
+        const userToAdd = await prisma.user.findUnique({
+            where: { email },
+            select: { id: true, name: true, email: true },
+        });
+
+        if (!userToAdd) {
+            throw new NotFoundError('User', `No user found with email: ${email}`);
+        }
+
+        // Check if already a participant
+        const existing = await prisma.meetingParticipant.findFirst({
+            where: { meetingId: id, userId: userToAdd.id },
+        });
+
+        if (existing) {
+            res.status(200).json({
+                success: true,
+                message: 'User is already a participant',
+                data: { participant: existing },
+            });
+            return;
+        }
+
+        const participant = await prisma.meetingParticipant.create({
+            data: {
+                meetingId: id,
+                userId: userToAdd.id,
+                role: 'participant',
+            },
+            include: {
+                user: { select: { id: true, name: true, email: true } },
+            },
+        });
+
+        // Notify the added user via in-app notification
+        try {
+            const notifKey = `notifications:user:${userToAdd.id}`;
+            const existing = (await getJSON<any[]>(notifKey)) || [];
+            const notification = {
+                id: `notif_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                type: 'meeting-invite',
+                title: 'Added to Meeting',
+                message: `You have been added to "${meeting.title}" scheduled on ${new Date(meeting.scheduledStartTime).toLocaleDateString()}.`,
+                meetingId: id,
+                meetingTitle: meeting.title,
+                createdAt: new Date().toISOString(),
+                read: false,
+            };
+            const updated = [notification, ...existing].slice(0, 200);
+            await setJSON(notifKey, updated, 60 * 60 * 24 * 30);
+        } catch (err) {
+            console.warn('[addParticipant] Notification failed:', err);
+        }
+
+        res.status(201).json({
+            success: true,
+            message: `${userToAdd.name || userToAdd.email} added to the meeting`,
+            data: { participant },
+        });
+    }
+);
+
+/**
+ * Remove Participant - Remove a participant from a meeting
+ * DELETE /api/v1/meetings/:id/participants/:participantId
+ */
+export const removeParticipant = asyncHandler(
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+        if (!req.user) {
+            throw new AuthorizationError('Authentication required');
+        }
+
+        const id = getParamId(req.params.id);
+        const participantId = getParamId(req.params.participantId);
+
+        const meeting = await prisma.meeting.findUnique({
+            where: { id },
+            select: { id: true, createdById: true },
+        });
+
+        if (!meeting) {
+            throw new NotFoundError('Meeting');
+        }
+
+        if (meeting.createdById !== req.user.id && req.user.role !== 'admin') {
+            throw new AuthorizationError('Only the meeting organizer can remove participants');
+        }
+
+        const participant = await prisma.meetingParticipant.findUnique({
+            where: { id: participantId },
+            select: { id: true, role: true, userId: true },
+        });
+
+        if (!participant) {
+            throw new NotFoundError('Participant');
+        }
+
+        if (participant.role === 'organizer') {
+            throw new BadRequestError('Cannot remove the meeting organizer');
+        }
+
+        await prisma.meetingParticipant.delete({ where: { id: participantId } });
+
+        res.status(200).json({
+            success: true,
+            message: 'Participant removed',
         });
     }
 );

@@ -73,7 +73,14 @@ async function processTranscriptionJob(
 
     const meeting = await prisma.meeting.findUnique({
         where: { id: meetingId },
-        select: { id: true },
+        select: {
+            id: true,
+            participants: {
+                select: {
+                    user: { select: { id: true, name: true, email: true } },
+                },
+            },
+        },
     });
 
     if (!meeting) {
@@ -83,10 +90,36 @@ async function processTranscriptionJob(
     await job.updateProgress(20);
 
     const transcriptionResult = await transcribeAudio(audioFilePath);
-    const transcriptText = transcriptionResult.fullTranscript?.trim();
+    const rawTranscriptText = transcriptionResult.fullTranscript?.trim();
 
-    if (!transcriptText) {
+    if (!rawTranscriptText) {
         throw new Error('Transcription service returned empty transcript');
+    }
+
+    // Build a speaker-labeled transcript from utterances when available.
+    // AssemblyAI returns Speaker A, Speaker B, etc. We include the participant
+    // list as a header so the AI can map anonymous speakers to real names.
+    const participantNames = meeting.participants
+        .map((p) => p.user.name || p.user.email)
+        .filter(Boolean);
+
+    let enrichedTranscript: string;
+    if (transcriptionResult.utterances && transcriptionResult.utterances.length > 0) {
+        const speakerLines = transcriptionResult.utterances
+            .map((u) => `${u.speaker}: ${u.text}`)
+            .join('\n');
+
+        const participantSection = participantNames.length
+            ? `Meeting participants (map speakers to these names using context clues):\n${participantNames.map((n) => `- ${n}`).join('\n')}\n\n`
+            : '';
+
+        enrichedTranscript = `${participantSection}Transcript:\n${speakerLines}`;
+    } else {
+        // Fallback: plain text with participant header
+        const participantSection = participantNames.length
+            ? `Meeting participants:\n${participantNames.map((n) => `- ${n}`).join('\n')}\n\n`
+            : '';
+        enrichedTranscript = `${participantSection}Transcript:\n${rawTranscriptText}`;
     }
 
     await job.updateProgress(60);
@@ -96,7 +129,7 @@ async function processTranscriptionJob(
         data: {
             transcriptPath: audioFilePath,
             transcriptUrl: `internal://transcripts/${meetingId}`,
-            minutesOfMeeting: transcriptText,
+            minutesOfMeeting: rawTranscriptText,
         },
     });
 
@@ -113,7 +146,7 @@ async function processTranscriptionJob(
         'extract-tasks-from-transcript',
         {
             meetingId,
-            transcript: transcriptText,
+            transcript: enrichedTranscript,
         }
     );
 
@@ -127,7 +160,7 @@ async function processTranscriptionJob(
 
     return {
         meetingId,
-        transcriptLength: transcriptText.length,
+        transcriptLength: rawTranscriptText.length,
         aiJobId,
     };
 }
