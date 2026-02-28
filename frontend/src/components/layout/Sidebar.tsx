@@ -27,7 +27,7 @@ const Sidebar = () => {
       {/* Brand Logo */}
       <div className="p-6 flex items-center gap-2">
         <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center font-bold">M</div>
-        <h1 className="text-xl font-bold tracking-tight">MeetingBrain</h1>
+        <h1 className="text-xl font-bold tracking-tight">Meeting Assistant</h1>
       </div>
 
       {/* Navigation */}

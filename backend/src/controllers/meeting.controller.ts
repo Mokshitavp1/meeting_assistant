@@ -851,13 +851,14 @@ export const confirmMeetingTasks = asyncHandler(
             )
         );
 
-        // Update meeting MoM if provided
-        if (minutesOfMeeting !== undefined) {
-            await prisma.meeting.update({
-                where: { id },
-                data: { minutesOfMeeting },
-            });
-        }
+        // Update meeting MoM and mark extraction as confirmed in a single write
+        await (prisma.meeting as any).update({
+            where: { id },
+            data: {
+                aiExtractionStatus: 'confirmed',
+                ...(minutesOfMeeting !== undefined ? { minutesOfMeeting } : {}),
+            },
+        });
 
         // Post-confirmation: calendar events + emails (best-effort, non-blocking)
         const meetingTitle = meeting.title;

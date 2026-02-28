@@ -10,7 +10,6 @@ import {
 } from '../middleware/error.middleware';
 import * as workspaceService from './workspace.service';
 import { queueTranscriptionJob } from '../jobs/transcription.job';
-import { queueTaskExtractionJob } from '../jobs/task-extraction.job';
 
 /**
  * Meeting Service
@@ -354,6 +353,9 @@ export async function getMeetingWithDetails(
                 },
             },
             tasks: {
+                where: {
+                    isConfirmed: true,
+                },
                 select: {
                     id: true,
                     title: true,
@@ -395,7 +397,7 @@ export async function updateMeetingStatus(
     // Verify access
     await verifyMeetingAccess(meetingId, userId);
 
-    const meeting = await prisma.meeting.findUnique({
+    const meeting = await (prisma.meeting as any).findUnique({
         where: { id: meetingId },
     });
 
@@ -598,164 +600,37 @@ export async function triggerAIProcessing(meetingId: string, userId: string): Pr
         throw new BadRequestError('No recording found. Upload a recording first.');
     }
 
+    // Idempotency guard: use aiExtractionStatus, not task count.
+    // This correctly handles the edge case where a user deletes all confirmed
+    // tasks and tries to re-trigger — the status persists regardless of tasks.
+    if (meeting.aiExtractionStatus !== 'pending') {
+        console.log(`[AI Processing] Meeting ${meetingId} already has aiExtractionStatus='${meeting.aiExtractionStatus}' — skipping duplicate trigger.`);
+        return;
+    }
+
+    // Mark as processing immediately to prevent concurrent duplicate triggers
+    await (prisma.meeting as any).update({
+        where: { id: meetingId },
+        data: { aiExtractionStatus: 'processing' },
+    });
+
     const audioPath = meeting.recordingPath || meeting.recordingUrl || '';
+    const assemblyAIKey = process.env.ASSEMBLYAI_API_KEY?.trim();
 
-    // Check if real AI credentials exist for transcription
-    const hasAssemblyAI = !!(
-        process.env.ASSEMBLYAI_API_KEY &&
-        !process.env.ASSEMBLYAI_API_KEY.includes('your-') &&
-        process.env.ASSEMBLYAI_API_KEY.length > 10
-    );
-
-    if (hasAssemblyAI) {
-        // Real path: queue transcription → AI extraction pipeline
-        await queueTranscriptionJob({ meetingId, audioFilePath: audioPath });
-        console.log(`[AI Processing] Queued transcription job for meeting ${meetingId}`);
-    } else {
-        // Dev fallback: skip transcription, generate synthetic MoM + task stubs
-        console.log(`[AI Processing] No AssemblyAI key — running dev fallback for meeting ${meetingId}`);
-        await runDevFallbackProcessing(meetingId);
-    }
-}
-
-/**
- * Dev-mode fallback: generate placeholder MoM and extract tasks via OpenAI/Anthropic
- * (or produce sample stubs if those keys are also absent).
- */
-async function runDevFallbackProcessing(meetingId: string): Promise<void> {
-    const meeting = await prisma.meeting.findUnique({
-        where: { id: meetingId },
-        select: {
-            id: true, title: true,
-            participants: {
-                select: {
-                    userId: true,
-                    user: { select: { id: true, name: true, email: true } },
-                },
-            },
-        },
-    });
-    if (!meeting) return;
-
-    const now = new Date().toISOString();
-    const participants = meeting.participants;
-    const participantNames = participants.map((p) => p.user.name || p.user.email).join(', ');
-
-    // Use actual participant names in the synthetic transcript
-    const nameAt = (index: number) =>
-        participants[index]?.user.name ||
-        participants[index]?.user.email ||
-        ['Facilitator', 'Member A', 'Member B'][index] ||
-        `Participant ${index + 1}`;
-
-    const p0 = nameAt(0);
-    const p1 = nameAt(1);
-    const p2 = nameAt(2);
-
-    const syntheticTranscript = [
-        `[Meeting: ${meeting.title} | ${now}]`,
-        `Participants: ${participantNames || 'Unknown'}`,
-        '',
-        `${p0}: Let's discuss the project timeline and assign responsibilities.`,
-        `${p1}: I will handle the backend API integration by end of next week.`,
-        `${p0}: Great. I'll prepare the design mockups by Wednesday.`,
-        `${p2}: I can review the designs on Thursday and provide feedback.`,
-        `${p0}: Perfect. ${p1}, please also write unit tests for the new endpoints.`,
-        `${p1}: Sure, I'll have those done by Friday.`,
-        `${p0}: Let's set up a follow-up meeting next Monday to review progress.`,
-    ].join('\n');
-
-    const minutesOfMeeting = [
-        `# Minutes of Meeting — ${meeting.title}`,
-        `**Date:** ${new Date().toLocaleDateString()}`,
-        `**Participants:** ${participantNames || 'Unknown'}`,
-        '',
-        '## Discussion',
-        '- Reviewed project timeline and assigned responsibilities.',
-        '- Agreed on design and backend deliverables.',
-        '- Scheduled a follow-up review meeting.',
-        '',
-        '## Action Items',
-        `- Backend API integration (${p1}) — due end of next week`,
-        `- Design mockups (${p0}) — due Wednesday`,
-        `- Design review and feedback (${p2}) — due Thursday`,
-        `- Unit tests for new endpoints (${p1}) — due Friday`,
-        `- Follow-up meeting (${p0}) — next Monday`,
-    ].join('\n');
-
-    // Update meeting with synthetic minutes
-    await prisma.meeting.update({
-        where: { id: meetingId },
-        data: {
-            transcriptUrl: `internal://dev-fallback/${meetingId}`,
-            minutesOfMeeting,
-            summary: 'AI generated minutes (dev fallback — no AssemblyAI key configured).',
-        },
-    });
-
-    // Check if OpenAI/Anthropic is available for real task extraction
-    const hasOpenAI = !!(
-        process.env.OPENAI_API_KEY &&
-        !process.env.OPENAI_API_KEY.includes('your-') &&
-        process.env.OPENAI_API_KEY.startsWith('sk-')
-    );
-    const hasAnthropic = !!(
-        process.env.ANTHROPIC_API_KEY &&
-        !process.env.ANTHROPIC_API_KEY.includes('your-') &&
-        process.env.ANTHROPIC_API_KEY.startsWith('sk-ant-')
-    );
-
-    if (hasOpenAI || hasAnthropic) {
-        // Use real AI to extract tasks from the synthetic transcript
-        await queueTaskExtractionJob({ meetingId, transcript: syntheticTranscript });
-    } else {
-        // Full dev fallback: create sample tasks directly in DB
-        console.log(`[AI Processing] No AI keys — creating sample tasks for meeting ${meetingId}`);
-        const UNCONFIRMED = '[UNCONFIRMED_AI_TASK]';
-
-        // Map first few participants to tasks
-        const sampleTasks = [
-            {
-                title: 'Complete backend API integration',
-                description: `${UNCONFIRMED} Implement and test the backend API endpoints as discussed.`,
-                assignedToId: participants[1]?.userId || participants[0]?.userId || null,
-                dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-                priority: 'high' as const,
-            },
-            {
-                title: 'Prepare design mockups',
-                description: `${UNCONFIRMED} Create UI/UX design mockups for review.`,
-                assignedToId: participants[0]?.userId || null,
-                dueDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
-                priority: 'medium' as const,
-            },
-            {
-                title: 'Write unit tests for new endpoints',
-                description: `${UNCONFIRMED} Cover all new API endpoints with unit tests.`,
-                assignedToId: participants[1]?.userId || null,
-                dueDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
-                priority: 'medium' as const,
-            },
-        ];
-
-        await prisma.$transaction(
-            sampleTasks.map((task) =>
-                prisma.task.create({
-                    data: {
-                        meetingId,
-                        title: task.title,
-                        description: task.description,
-                        assignedToId: task.assignedToId,
-                        dueDate: task.dueDate,
-                        status: 'pending',
-                        priority: task.priority,
-                        isConfirmed: false,
-                    },
-                })
-            )
+    if (!assemblyAIKey || assemblyAIKey === 'your_key_here' || assemblyAIKey.includes('your-')) {
+        // Reset status so the user can retry immediately after fixing .env
+        await (prisma.meeting as any).update({
+            where: { id: meetingId },
+            data: { aiExtractionStatus: 'pending' },
+        });
+        throw new Error(
+            'ASSEMBLYAI_API_KEY is missing. Add it to .env to process meetings.'
         );
-        console.log(`[AI Processing] Created ${sampleTasks.length} sample tasks for meeting ${meetingId}`);
     }
+
+    // Real path: queue transcription → AI extraction pipeline
+    await queueTranscriptionJob({ meetingId, audioFilePath: audioPath });
+    console.log(`[AI Processing] Queued transcription job for meeting ${meetingId}`);
 }
 
 /**

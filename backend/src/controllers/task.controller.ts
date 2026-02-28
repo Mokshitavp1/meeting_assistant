@@ -185,7 +185,9 @@ export const listTasks = asyncHandler(
         const limitNum = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
         const skip = (pageNum - 1) * limitNum;
 
-        const where: any = {};
+        const where: any = {
+            isConfirmed: true,
+        };
 
         if (status) {
             where.status = status;

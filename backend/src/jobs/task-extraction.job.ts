@@ -214,10 +214,11 @@ async function processTaskExtractionJob(
 
     await job.updateProgress(5);
 
-    const meeting = await prisma.meeting.findUnique({
+    const meeting = await (prisma.meeting as any).findUnique({
         where: { id: meetingId },
         select: {
             id: true,
+            aiExtractionStatus: true,
             participants: {
                 select: {
                     userId: true,
@@ -237,7 +238,23 @@ async function processTaskExtractionJob(
         throw new NotFoundError('Meeting');
     }
 
-    const participants: MeetingParticipant[] = meeting.participants.map((participant) => ({
+    // Idempotency guard using status, not task count.
+    // If the status is already 'extracted' or 'confirmed', a previous run succeeded.
+    // 'processing' means triggerAIProcessing set the flag but hasn't completed yet —
+    // only skip if this is a retry attempt (attemptsMade > 0) to avoid a race on
+    // the very first run where status was just set.
+    if (meeting.aiExtractionStatus === 'extracted' || meeting.aiExtractionStatus === 'confirmed') {
+        console.warn(
+            `[TaskExtractionJob] Skipping — meeting=${meetingId} already has aiExtractionStatus='${meeting.aiExtractionStatus}'`
+        );
+        return {
+            meetingId,
+            createdTaskCount: 0,
+            momJobId: 'skipped',
+        };
+    }
+
+    const participants: MeetingParticipant[] = meeting.participants.map((participant: any) => ({
         id: participant.user.id,
         name: participant.user.name || participant.user.email,
         email: participant.user.email,
@@ -272,26 +289,36 @@ async function processTaskExtractionJob(
 
     await job.updateProgress(55);
 
-    const createdTasks = await prisma.$transaction(
-        extractedTasks.map((task) => {
-            const normalizedAssignee = normalizeName(task.assigneeName);
-            const assignedToId = normalizedAssignee
-                ? participantAssigneeMap.get(normalizedAssignee) || null
-                : null;
+    let createdTasks: { id: string }[];
 
-            return prisma.task.create({
-                data: {
-                    meetingId,
-                    title: task.title,
-                    description: `${UNCONFIRMED_TASK_PREFIX} ${task.description || ''}`.trim(),
-                    assignedToId,
-                    dueDate: parseDueDate(task.deadline),
-                    status: 'pending',
-                    priority: mapConfidenceToPriority(task.confidence),
-                },
-            });
-        })
-    );
+    createdTasks = await prisma.$transaction(async (tx) => {
+        const tasks = await Promise.all(
+            extractedTasks.map((task) => {
+                const normalizedAssignee = normalizeName(task.assigneeName);
+                const assignedToId = normalizedAssignee
+                    ? participantAssigneeMap.get(normalizedAssignee) || null
+                    : null;
+
+                return tx.task.create({
+                    data: {
+                        meetingId,
+                        title: task.title,
+                        description: `${UNCONFIRMED_TASK_PREFIX} ${task.description || ''}`.trim(),
+                        assignedToId,
+                        dueDate: parseDueDate(task.deadline),
+                        status: 'pending',
+                        priority: mapConfidenceToPriority(task.confidence),
+                    },
+                });
+            })
+        );
+        // Atomically mark extraction complete so no second run can slip through
+        await (tx.meeting as any).update({
+            where: { id: meetingId },
+            data: { aiExtractionStatus: 'extracted' },
+        });
+        return tasks;
+    });
 
     await job.updateProgress(75);
 

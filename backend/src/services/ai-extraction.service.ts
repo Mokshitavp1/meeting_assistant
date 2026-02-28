@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { BadRequestError, ExternalServiceError } from '../middleware/error.middleware';
+import logger from '../utils/logger';
 
 export type AIProvider = 'openai' | 'anthropic';
 
@@ -20,7 +21,7 @@ export interface ExtractTasksInput {
 
 export interface ExtractedTask {
     title: string;
-    assigneeName: string | null;
+    assigneeName: string;
     deadline: string | null;
     description: string;
     confidence: number;
@@ -55,7 +56,7 @@ const aiResponseEnvelopeSchema = z.object({
 
 const normalizedTaskSchema = z.object({
     title: z.string().trim().min(1),
-    assigneeName: z.string().trim().nullable(),
+    assigneeName: z.string().trim().min(1),
     deadline: z.string().datetime().nullable(),
     description: z.string().trim(),
     confidence: z.number().min(0).max(1),
@@ -63,6 +64,16 @@ const normalizedTaskSchema = z.object({
 
 const OPENAI_DEFAULT_MODEL = 'gpt-4o-mini';
 const ANTHROPIC_DEFAULT_MODEL = 'claude-3-5-sonnet-latest';
+const UNASSIGNED_ASSIGNEE = 'Unassigned';
+const ASSIGNEE_PLACEHOLDER_PATTERNS = [
+    /^member\s+[a-z0-9]+$/i,
+    /^speaker\s+[a-z0-9]+$/i,
+    /^participant\s+[a-z0-9]+$/i,
+    /^facilitator$/i,
+    /^unknown$/i,
+    /^n\/?a$/i,
+    /^none$/i,
+];
 
 const SYSTEM_PROMPT = [
     'You are an expert meeting assistant that extracts action items from transcripts.',
@@ -72,7 +83,7 @@ const SYSTEM_PROMPT = [
     '  "tasks": [',
     '    {',
     '      "title": "string",',
-    '      "assigneeName": "string | null",',
+    '      "assigneeName": "string",',
     '      "deadline": "ISO-8601 date-time string | null",',
     '      "description": "string",',
     '      "confidence": "number between 0 and 1"',
@@ -80,7 +91,9 @@ const SYSTEM_PROMPT = [
     '  ]',
     '}',
     'Only include tasks that are explicitly or strongly implied in the transcript.',
-    'If assignee is unknown, use null.',
+    'For every task, set "assigneeName" to the first name spoken in the transcript for the responsible person.',
+    'Do not use placeholders such as "Member A", "Member B", "Speaker A", or role labels.',
+    'If no person name is present for a task, set "assigneeName" to "Unassigned".',
     'If deadline is unknown, use null.',
     'Confidence must be a numeric score from 0 to 1.',
 ].join('\n');
@@ -98,11 +111,12 @@ export function buildTaskExtractionPrompt(
         'Extract action items from this meeting transcript.',
         `Return at most ${maxTasks} tasks.`,
         'IMPORTANT: For every task, identify who was assigned or volunteered to do it in the transcript.',
-        'The "assigneeName" field MUST be the real name of the person responsible from the Participants list below.',
+        'The "assigneeName" field MUST be the first name (single given name) spoken in the transcript for the person responsible.',
         'If the transcript uses labels like "Speaker A", "Speaker B" etc., map them to participant names:',
         '  - Use any context clues (greetings, references by name, role mentions) to resolve the mapping.',
         '  - If a participant name is mentioned directly in the text, prioritise that over speaker labels.',
-        'Only set "assigneeName" to null if truly no person is mentioned for that task.',
+        'Never output placeholders like "Member A", "Member B", "Speaker A", or role-only labels.',
+        'If no person name is mentioned for a task, set "assigneeName" exactly to "Unassigned".',
         '',
         'Participants:',
         participantList,
@@ -120,18 +134,60 @@ function normalizeText(value: string): string {
         .trim();
 }
 
-function matchAssigneeName(
-    assigneeName: string | null | undefined,
-    participants: MeetingParticipant[]
-): string | null {
-    if (!assigneeName || !participants.length) {
+function normalizeFirstName(value: string): string | null {
+    const firstToken = value
+        .trim()
+        .replace(/[“”"'`]/g, '')
+        .split(/\s+/)
+        .find((token) => token.length > 0);
+
+    if (!firstToken) {
         return null;
     }
 
-    const normalizedAssignee = normalizeText(assigneeName);
+    const cleanedToken = firstToken.replace(/[^a-zA-Z0-9-]/g, '');
+    if (!cleanedToken) {
+        return null;
+    }
+
+    return cleanedToken.charAt(0).toUpperCase() + cleanedToken.slice(1);
+}
+
+function isPlaceholderAssignee(value: string): boolean {
+    const normalizedValue = value.trim();
+    return ASSIGNEE_PLACEHOLDER_PATTERNS.some((pattern) => pattern.test(normalizedValue));
+}
+
+function matchAssigneeName(
+    assigneeName: string | null | undefined,
+    participants: MeetingParticipant[]
+): string {
+    if (!assigneeName) {
+        return UNASSIGNED_ASSIGNEE;
+    }
+
+    const rawAssignee = assigneeName.trim();
+    if (!rawAssignee || isPlaceholderAssignee(rawAssignee)) {
+        return UNASSIGNED_ASSIGNEE;
+    }
+
+    if (/^unassigned$/i.test(rawAssignee)) {
+        return UNASSIGNED_ASSIGNEE;
+    }
+
+    const fallbackFirstName = normalizeFirstName(rawAssignee);
+    if (!fallbackFirstName) {
+        return UNASSIGNED_ASSIGNEE;
+    }
+
+    if (!participants.length) {
+        return fallbackFirstName;
+    }
+
+    const normalizedAssignee = normalizeText(rawAssignee);
 
     if (!normalizedAssignee) {
-        return null;
+        return UNASSIGNED_ASSIGNEE;
     }
 
     const exactMatch = participants.find(
@@ -139,7 +195,7 @@ function matchAssigneeName(
     );
 
     if (exactMatch) {
-        return exactMatch.name;
+        return normalizeFirstName(exactMatch.name) || fallbackFirstName;
     }
 
     const partialMatches = participants.filter((participant) => {
@@ -151,10 +207,21 @@ function matchAssigneeName(
     });
 
     if (partialMatches.length === 1) {
-        return partialMatches[0].name;
+        return normalizeFirstName(partialMatches[0].name) || fallbackFirstName;
     }
 
-    return null;
+    const firstNameMatches = participants.filter((participant) => {
+        const participantFirstName = normalizeFirstName(participant.name);
+        return participantFirstName
+            ? normalizeText(participantFirstName) === normalizeText(fallbackFirstName)
+            : false;
+    });
+
+    if (firstNameMatches.length === 1) {
+        return normalizeFirstName(firstNameMatches[0].name) || fallbackFirstName;
+    }
+
+    return fallbackFirstName;
 }
 
 function parseDeadlineToISO(deadline: string | null | undefined): string | null {
@@ -348,6 +415,9 @@ export async function extractTasksFromTranscript(input: ExtractTasksInput): Prom
         validatedInput.participants,
         validatedInput.maxTasks
     );
+
+    logger.log('info', '=== TRANSCRIPT SENT TO LLM (first 500 chars) ===');
+    logger.log('info', validatedInput.transcript.substring(0, 500));
 
     const rawAIResponse = await callAIProvider(
         validatedInput.provider,

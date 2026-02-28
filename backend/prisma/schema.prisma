@@ -145,6 +145,10 @@ model Meeting {
   summary         String?  @db.Text
   minutesOfMeeting String? @db.Text
 
+  // AI extraction pipeline status
+  // pending | processing | extracted | confirmed
+  aiExtractionStatus String @default("pending")
+
   // Creator
   createdById String
   createdBy   User   @relation(fields: [createdById], references: [id], onDelete: Cascade)
@@ -219,6 +223,10 @@ model Task {
   // Relations
   comments    TaskComment[]
 
+  // Note: assignedToId is excluded from the unique key because PostgreSQL treats
+  // each NULL as distinct, making a 3-column unique constraint on a nullable column
+  // ineffective. (meeting_id, title) is the meaningful dedup key.
+  @@unique([meetingId, title])
   @@index([meetingId])
   @@index([assignedToId])
   @@index([status])

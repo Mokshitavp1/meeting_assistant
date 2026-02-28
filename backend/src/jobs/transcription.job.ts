@@ -3,6 +3,7 @@ import { prisma } from '../config/database';
 import { redisClient } from '../config/redis';
 import { NotFoundError, BadRequestError } from '../middleware/error.middleware';
 import { transcribeAudio } from '../services/transcription.service';
+import logger from '../utils/logger';
 
 export interface TranscriptionJobData {
     meetingId: string;
@@ -95,6 +96,9 @@ async function processTranscriptionJob(
     if (!rawTranscriptText) {
         throw new Error('Transcription service returned empty transcript');
     }
+
+    logger.log('info', '=== RAW STT OUTPUT (first 500 chars) ===');
+    logger.log('info', rawTranscriptText.substring(0, 500));
 
     // Build a speaker-labeled transcript from utterances when available.
     // AssemblyAI returns Speaker A, Speaker B, etc. We include the participant

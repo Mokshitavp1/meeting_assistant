@@ -4,6 +4,8 @@ import { config } from 'dotenv';
 import app, { corsOptions } from './app';
 import { DatabaseClient } from './config/database';
 import { RedisClient } from './config/redis';
+import { initializeTranscriptionQueue } from './jobs/transcription.job';
+import { initializeTaskExtractionQueue } from './jobs/task-extraction.job';
 import { socketAuthMiddleware, getSocketUser } from './websocket/auth.middleware';
 import logger from './utils/logger';
 
@@ -76,6 +78,13 @@ async function initializeServices(): Promise<void> {
         // Connect to Redis
         logger.info('Connecting to Redis...');
         await RedisClient.connect();
+
+        // Initialize background workers
+        logger.info('Initializing transcription queue...');
+        await initializeTranscriptionQueue();
+
+        logger.info('Initializing task extraction queue...');
+        await initializeTaskExtractionQueue();
 
         logger.info('All services initialized successfully');
     } catch (error) {
